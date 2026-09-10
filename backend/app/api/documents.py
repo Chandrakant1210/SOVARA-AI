@@ -40,6 +40,31 @@ async def upload_document(file: UploadFile = File(...)):
     try:
         extracted_text = extract_text_from_image(file_path)
     except Exception as e:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        raise HTTPException(status_code=500, detail=f"OCR processing failed: {str(e)}")
+
+    return UploadResponse(filename=file.filename, extracted_text=extracted_text)
+    ext = os.path.splitext(file.filename)[1].lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{ext}'. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
+        )
+
+    unique_name = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join(UPLOAD_DIR, unique_name)
+
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
+
+    try:
+        extracted_text = extract_text_from_image(file_path)
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"OCR processing failed: {str(e)}")
 
     return UploadResponse(filename=file.filename, extracted_text=extracted_text)
