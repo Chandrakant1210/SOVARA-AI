@@ -1,9 +1,11 @@
 import os
 import shutil
 import uuid
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from pydantic import BaseModel
 from app.services.ocr_service import extract_text_from_image
+from app.core.deps import get_current_user
+from app.models.user import User
 
 router = APIRouter()
 
@@ -19,7 +21,10 @@ class UploadResponse(BaseModel):
 
 
 @router.post("/documents/upload", response_model=UploadResponse)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
     ext = os.path.splitext(file.filename)[1].lower()
 
     if ext not in ALLOWED_EXTENSIONS:
