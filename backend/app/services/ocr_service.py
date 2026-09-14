@@ -1,12 +1,16 @@
-import numpy as np
+﻿import numpy as np
 import fitz  # PyMuPDF
-
-
+import ollama
 from paddleocr import PaddleOCR
+from app.config.model_registry import get_model_for_capability
 
 # Initialize once at module load — loading the model is expensive,
 # we don't want to reload it on every request.
 _ocr_engine = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+
+# Threshold below which PaddleOCR output is considered too weak to trust —
+# triggers a fallback to the vision model.
+MIN_TEXT_LENGTH = 20
 
 
 def extract_text_from_pdf(file_path: str) -> str:
@@ -19,7 +23,6 @@ def extract_text_from_pdf(file_path: str) -> str:
 
     for page_num in range(len(doc)):
         page = doc[page_num]
-        # Render at 2x zoom for better OCR accuracy on scanned text
         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
         img_array = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
             pix.height, pix.width, pix.n
@@ -48,27 +51,17 @@ def extract_text_from_image(file_path: str) -> str:
     return "\n".join(lines)
 
 
-
-
-# import base64
-import ollama
-
-# Threshold below which PaddleOCR output is considered too weak to trust —
-# triggers a fallback to the vision model.
-MIN_TEXT_LENGTH = 20
-
-
 def extract_text_with_vision(file_path: str) -> str:
     """
-    Uses Qwen2.5-VL (via Ollama) to extract/describe text and visual
-    content from an image. Used as a fallback when PaddleOCR returns
-    little or no usable text.
+    Uses the registered vision model (via Ollama) to extract/describe
+    text and visual content from an image. Used as a fallback when
+    PaddleOCR returns little or no usable text.
     """
     with open(file_path, "rb") as f:
         image_bytes = f.read()
 
     response = ollama.chat(
-        model="qwen2.5vl:7b",
+        model=get_model_for_capability("vision")["model_name"],
         messages=[
             {
                 "role": "user",
@@ -89,7 +82,7 @@ def extract_text_with_fallback(file_path: str) -> str:
     """
     Runs PaddleOCR first. If the result is too short to be useful
     (e.g. a low-quality scan, stamp, or diagram-heavy page), falls
-    back to the Qwen2.5-VL vision model.
+    back to the vision model.
     """
     ocr_text = extract_text_from_image(file_path)
 
