@@ -11,7 +11,10 @@ router = APIRouter()
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    role: UserRole = UserRole.ENGINEER
+    # role intentionally omitted — every self-registered account is
+    # created as ENGINEER (lowest privilege). Promoting someone to
+    # ADMIN/MANAGER must go through a separate, authenticated,
+    # admin-only endpoint (not built yet).
 
 
 class LoginRequest(BaseModel):
@@ -42,7 +45,7 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     user = User(
         email=request.email,
         hashed_password=hash_password(request.password),
-        role=request.role,
+        role=UserRole.ENGINEER,  # hardcoded, never client-supplied
     )
     db.add(user)
     db.commit()
