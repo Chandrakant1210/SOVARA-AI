@@ -18,3 +18,4 @@ Thumbs.db
 # Editor
 .vscode/
 backend/uploads/
+backend/generated_docs/

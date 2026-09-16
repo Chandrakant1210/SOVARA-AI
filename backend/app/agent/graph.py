@@ -1,14 +1,8 @@
-﻿"""
-SOVARA AI — LangGraph Agent
-
-Defines the core agent graph: Understand -> Retrieve -> Reason -> Generate.
-Each node calls a real model via the model registry — no stubs.
-"""
-
-import ollama
+﻿import ollama
 from langgraph.graph import StateGraph, END
 from app.agent.state import AgentState
 from app.config.model_registry import get_model_for_capability
+from app.services.docx_service import generate_approval_note
 
 
 def _call_reasoning_model(prompt: str) -> str:
@@ -75,18 +69,20 @@ def reason_node(state: AgentState) -> dict:
 
 def generate_node(state: AgentState) -> dict:
     """
-    Produces the final deliverable text, ready to be turned into a
-    DOCX approval note.
+    Produces the final deliverable text, then generates a real DOCX
+    approval note from it.
     """
     prompt = (
         "Write a formal approval note based on the analysis below. "
         "Structure it with a brief summary, key findings, and a clear "
-        "recommendation.\n\n"
+        "recommendation. Use **bold** markdown for section headers.\n\n"
         f"Analysis: {state['reasoning_output']}"
     )
     final_output = _call_reasoning_model(prompt)
+    docx_path = generate_approval_note(final_output, title="SOVARA AI — Approval Note")
     return {
         "final_output": final_output,
+        "docx_path": docx_path,
         "steps_completed": state.get("steps_completed", []) + ["generate"],
     }
 

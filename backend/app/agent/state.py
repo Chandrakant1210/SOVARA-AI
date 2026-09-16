@@ -31,6 +31,9 @@ class AgentState(TypedDict):
     # turned into a DOCX approval note.
     final_output: Optional[str]
 
+    # Set by the Generate node: file path of the generated DOCX approval note.
+    docx_path: Optional[str]
+
     # Simple trace of which nodes have run, useful for debugging and
     # later for showing live agent progress in the UI.
     steps_completed: list
