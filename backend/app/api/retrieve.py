@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from app.services.embedding_service import get_embedding
 from app.services.qdrant_service import search
 from app.core.deps import get_current_user
@@ -10,7 +10,7 @@ router = APIRouter()
 
 class RetrieveRequest(BaseModel):
     query: str
-    top_k: int = 3
+    top_k: int = Field(default=3, gt=0, le=20)
 
 
 class RetrievedChunk(BaseModel):
@@ -29,8 +29,15 @@ def retrieve(
     request: RetrieveRequest,
     current_user: User = Depends(get_current_user),
 ):
-    query_embedding = get_embedding(request.query)
-    raw_results = search(query_embedding, top_k=request.top_k)
+    try:
+        query_embedding = get_embedding(request.query)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Embedding generation failed: {str(e)}")
+
+    try:
+        raw_results = search(query_embedding, top_k=request.top_k)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Vector search failed: {str(e)}")
 
     results = [
         RetrievedChunk(
