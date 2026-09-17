@@ -10,7 +10,7 @@ models:
     model_name: "qwen3:14B"
     description: "General reasoning, document analysis, planning, drafting"
     context_length: 32768
-    available: true
+    available: false  # not yet pulled on this machine — flip to true once `ollama pull qwen3:14b` is run
 
   qwen2.5-vl-7b:
     capability: vision
@@ -18,7 +18,7 @@ models:
     model_name: "qwen2.5vl:7b"
     description: "Scanned documents, images, engineering drawings, P&IDs"
     context_length: 32768
-    available: true
+    available: false  # verify with `ollama list` — flip to true once confirmed pulled
 
   qwen2.5-coder-14b:
     capability: coding
@@ -29,9 +29,9 @@ models:
     available: false  # not yet pulled — pluggable placeholder
 
   qwen3-8b:
-    capability: classification
+    capability: reasoning
     provider: ollama
     model_name: "qwen3:8b"
-    description: "Fast classification, intent detection, lightweight routing"
+    description: "General reasoning, document analysis, planning, drafting — currently the only reasoning model confirmed available on this hardware"
     context_length: 32768
-    available: false  # not yet pulled — pluggable placeholder
+    available: true  # confirmed pulled via `ollama list`

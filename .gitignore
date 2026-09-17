@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.pyc
 *.pyo
@@ -10,11 +10,11 @@ venv/
 node_modules/
 .next/
 out/
-
 # OS
 .DS_Store
 Thumbs.db
-
 # Editor
 .vscode/
 backend/uploads/
+backend/generated_docs/
+backend/sovara.db
