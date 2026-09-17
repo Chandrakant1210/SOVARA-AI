@@ -3,6 +3,8 @@ from langgraph.graph import StateGraph, END
 from app.agent.state import AgentState
 from app.config.model_registry import get_model_for_capability
 from app.services.docx_service import generate_approval_note
+from app.services.embedding_service import get_embedding
+from app.services.qdrant_service import search
 
 
 def _call_reasoning_model(prompt: str) -> str:
@@ -36,12 +38,21 @@ def understand_node(state: AgentState) -> dict:
 
 def retrieve_node(state: AgentState) -> dict:
     """
-    Retrieves relevant private context. Currently a stub — Chandrakant's
-    /api/retrieve endpoint is not yet available. Returns an empty list
-    so the graph runs end to end without blocking on RAG.
+    Retrieves relevant private context from Qdrant, using the raw
+    user question as the query — more predictable than embedding the
+    model's restated understanding, which can drift (e.g. focusing on
+    "no document was provided" rather than the actual question asked).
     """
+    try:
+        query_embedding = get_embedding(state["user_input"])
+        raw_results = search(query_embedding, top_k=3)
+        context = [r.payload["text"] for r in raw_results]
+    except Exception as e:
+        print(f"RETRIEVE_NODE ERROR: {type(e).__name__}: {e}")
+        context = []
+
     return {
-        "retrieved_context": [],
+        "retrieved_context": context,
         "steps_completed": state.get("steps_completed", []) + ["retrieve"],
     }
 
