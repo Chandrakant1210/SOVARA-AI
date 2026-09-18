@@ -7,11 +7,11 @@ import ChatPanel from "@/components/ChatPanel";
 import SecurityPanel from "@/components/SecurityPanel";
 import LoginScreen from "@/components/LoginScreen";
 import { useAuth } from "@/lib/AuthContext";
+import DocumentsPanel from "@/components/DocumentsPanel";
 
 type Tab = "Chat" | "Documents" | "Review" | "Audit";
 
-const COMING_SOON: Record<Exclude<Tab, "Chat">, string> = {
-  Documents: "Document upload, OCR and vision extraction — Day 4–5.",
+const COMING_SOON: Record<Exclude<Tab, "Chat" | "Documents">, string> = {
   Review: "Human approve / reject / modify screen — Day 6.",
   Audit: "Full audit trail from PostgreSQL — Day 11.",
 };
@@ -66,6 +66,8 @@ export default function Home() {
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_380px] min-h-[calc(100vh-129px)]">
         {tab === "Chat" ? (
           <ChatPanel />
+        ) : tab === "Documents" ? (
+          <DocumentsPanel />
         ) : (
           <div className="flex items-center justify-center px-8">
             <p className="text-sm text-[#5B6670] max-w-sm text-center leading-relaxed">
