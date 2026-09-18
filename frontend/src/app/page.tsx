@@ -5,6 +5,8 @@ import { useState } from "react";
 import TopNav from "@/components/TopNav";
 import ChatPanel from "@/components/ChatPanel";
 import SecurityPanel from "@/components/SecurityPanel";
+import LoginScreen from "@/components/LoginScreen";
+import { useAuth } from "@/lib/AuthContext";
 
 type Tab = "Chat" | "Documents" | "Review" | "Audit";
 
@@ -16,6 +18,19 @@ const COMING_SOON: Record<Exclude<Tab, "Chat">, string> = {
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("Chat");
+  const { isAuthenticated, loading, logout } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0A0E12] flex items-center justify-center">
+        <span className="text-sm text-[#5B6670] font-mono">loading…</span>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <LoginScreen />;
+  }
 
   return (
     <div className="min-h-screen bg-[#0A0E12] flex flex-col">
@@ -28,11 +43,19 @@ export default function Home() {
             Sovereign AI Reasoning Assistant
           </span>
         </div>
-        <div className="flex items-center gap-2 text-xs font-mono text-[#8B98A3] pb-5">
-          <span className="relative flex h-1.5 w-1.5">
-            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#2FD9C3]" />
-          </span>
-          Air-gapped session
+        <div className="flex items-center gap-4 pb-5">
+          <div className="flex items-center gap-2 text-xs font-mono text-[#8B98A3]">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#2FD9C3]" />
+            </span>
+            Air-gapped session
+          </div>
+          <button
+            onClick={logout}
+            className="text-xs text-[#5B6670] hover:text-[#8B98A3] transition-colors"
+          >
+            Sign out
+          </button>
         </div>
       </header>
 

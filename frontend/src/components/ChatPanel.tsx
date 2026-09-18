@@ -3,6 +3,7 @@
 
 import { useState, useRef } from "react";
 import AgentTracker from "./AgentTracker";
+import { authFetch } from "@/lib/api";
 
 const EXAMPLES = [
   "Summarize the attached inspection report and flag anomalies",
@@ -43,14 +44,10 @@ export default function ChatPanel() {
     runStageAnimation();
 
     try {
-      const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/api/chat`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt }),
-        }
-      );
+      const res = await authFetch("/api/chat", {
+        method: "POST",
+        body: JSON.stringify({ prompt }),
+      });
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => null);
