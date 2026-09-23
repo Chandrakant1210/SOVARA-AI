@@ -1,9 +1,9 @@
 // src/components/ChatPanel.tsx
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import AgentTracker from "./AgentTracker";
-import { authFetch } from "@/lib/api";
+import { getToken } from "@/lib/api";
 
 const EXAMPLES = [
   "Summarize the attached inspection report and flag anomalies",
@@ -11,29 +11,15 @@ const EXAMPLES = [
   "Search the SOP library for pump seal replacement procedure",
 ];
 
-const STAGE_COUNT = 6;
-const STAGE_DURATION_MS = 350;
+const STAGES = ["understand", "plan", "retrieve", "reason", "validate", "generate"];
 
 export default function ChatPanel() {
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState("");
+  const [docxPath, setDocxPath] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [stageIndex, setStageIndex] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const runStageAnimation = () => {
-    setStageIndex(0);
-    timerRef.current = setInterval(() => {
-      setStageIndex((prev) => {
-        if (prev >= STAGE_COUNT - 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          return prev;
-        }
-        return prev + 1;
-      });
-    }, STAGE_DURATION_MS);
-  };
 
   const handleSubmit = async () => {
     if (!prompt.trim()) return;
@@ -41,25 +27,59 @@ export default function ChatPanel() {
     setLoading(true);
     setError("");
     setResponse("");
-    runStageAnimation();
+    setDocxPath("");
+    setStageIndex(0);
 
     try {
-      const res = await authFetch("/api/chat", {
+      const token = getToken();
+      const res = await fetch("http://localhost:8000/api/agent/run/stream", {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ user_input: prompt }),
       });
 
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => null);
-        throw new Error(errBody?.detail ?? `Request failed with status ${res.status}`);
+      if (!res.ok || !res.body) {
+        throw new Error(`Request failed with status ${res.status}`);
       }
 
-      const data = await res.json();
-      setResponse(data.response);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+
+          const jsonStr = line.slice(5).trim();
+          const event = JSON.parse(jsonStr);
+
+          if (event.type === "step_complete") {
+            const idx = STAGES.indexOf(event.node);
+            if (idx !== -1) setStageIndex(idx);
+          } else if (event.type === "done") {
+            setStageIndex(STAGES.length - 1);
+            setResponse(event.final_output ?? "");
+            setDocxPath(event.docx_path ?? "");
+          } else if (event.type === "error") {
+            throw new Error(event.detail ?? "Agent execution failed");
+          }
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
-      if (timerRef.current) clearInterval(timerRef.current);
       setLoading(false);
     }
   };
@@ -143,6 +163,11 @@ export default function ChatPanel() {
               <p className="text-[15px] text-[#E7ECEF] leading-relaxed whitespace-pre-wrap">
                 {response}
               </p>
+              {docxPath && (
+                <p className="mt-3 text-xs text-[#5B6670] font-mono">
+                  Generated document: {docxPath}
+                </p>
+              )}
             </div>
           )}
         </div>
