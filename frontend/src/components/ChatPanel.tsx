@@ -5,6 +5,7 @@ import { useState } from "react";
 import AgentTracker from "./AgentTracker";
 import { getToken } from "@/lib/api";
 import type { AgentResult } from "@/app/page";
+import ReactMarkdown from "react-markdown";
 
 const EXAMPLES = [
   "Summarize the attached inspection report and flag anomalies",
@@ -176,9 +177,9 @@ export default function ChatPanel({
               <span className="font-mono text-xs text-[#5B6670] block mb-2">
                 response · local model
               </span>
-              <p className="text-[15px] text-[#E7ECEF] leading-relaxed whitespace-pre-wrap">
-                {response}
-              </p>
+              <div className="text-[15px] text-[#E7ECEF] leading-relaxed [&>p]:mb-3 [&>p:last-child]:mb-0 [&_strong]:font-semibold [&_strong]:text-[#E7ECEF] [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3 [&_li]:mb-1">
+                <ReactMarkdown>{response}</ReactMarkdown>
+              </div>
               {citations.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {citations.map((c, i) => (
