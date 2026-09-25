@@ -11,6 +11,7 @@ type SecurityStatus = {
   cloud_models_in_use: number;
   data_egress_mb: number;
   sandbox_network: string;
+  active_model: string;
 };
 
 const POLL_INTERVAL_MS = 5000;
@@ -120,7 +121,7 @@ export default function SecurityPanel() {
         <div className="flex items-baseline justify-between py-3 border-b border-[#1E262C]">
           <span className="text-sm text-[#8B98A3]">Active model</span>
           <span className="font-mono text-sm text-[#E7ECEF]">
-            Qwen3 14B (local)
+            {status ? `${status.active_model} (local)` : "—"}
           </span>
         </div>
       </div>
