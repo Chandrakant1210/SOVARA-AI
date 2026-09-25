@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { authFetch } from "@/lib/api";
 import type { AgentResult } from "@/app/page";
+import ReactMarkdown from "react-markdown";
 
 type Decision = "approved" | "rejected" | null;
 
@@ -93,9 +94,9 @@ export default function ReviewPanel({
               onChange={(e) => setEditedText(e.target.value)}
             />
           ) : (
-            <p className="text-[15px] text-[#E7ECEF] leading-relaxed whitespace-pre-wrap">
-              {editedText}
-            </p>
+            <div className="text-[15px] text-[#E7ECEF] leading-relaxed [&>p]:mb-3 [&>p:last-child]:mb-0 [&_strong]:font-semibold [&_strong]:text-[#E7ECEF] [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:mb-3 [&_li]:mb-1">
+              <ReactMarkdown>{editedText}</ReactMarkdown>
+            </div>
           )}
 
           {result.citations.length > 0 && !isEditing && (
