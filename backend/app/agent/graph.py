@@ -69,12 +69,21 @@ def retrieve_node(state: AgentState) -> dict:
         query_embedding = get_embedding(state["user_input"])
         raw_results = search(query_embedding, top_k=3)
         context = [r.payload["text"] for r in raw_results]
-    except Exception as e:
-        print(f"RETRIEVE_NODE ERROR: {type(e).__name__}: {e}")
+        citations = [
+            {
+                "source": r.payload.get("source", "unknown"),
+                "score": round(r.score, 3),
+            }
+            for r in raw_results
+        ]
+    except Exception as err:
+        print(f"RETRIEVE_NODE ERROR: {type(err).__name__}: {err}")
         context = []
+        citations = []
 
     return {
         "retrieved_context": context,
+        "citations": citations,
         "steps_completed": state.get("steps_completed", []) + ["retrieve"],
     }
 
@@ -145,10 +154,9 @@ def generate_node(state: AgentState) -> dict:
     return {
         "final_output": final_output,
         "docx_path": docx_path,
+        "citations": state.get("citations", []),
         "steps_completed": state.get("steps_completed", []) + ["generate"],
     }
-
-
 def build_agent_graph():
     """Builds and compiles the SOVARA agent graph."""
     graph = StateGraph(AgentState)

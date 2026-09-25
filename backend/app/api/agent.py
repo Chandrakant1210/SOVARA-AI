@@ -84,6 +84,7 @@ def _stream_agent_events(user_input: str, document_text: Optional[str]):
                         "type": "done",
                         "final_output": node_state.get("final_output"),
                         "docx_path": node_state.get("docx_path"),
+                        "citations": node_state.get("citations", []),
                     }
                     yield f"data: {json.dumps(final_event)}\n\n"
 

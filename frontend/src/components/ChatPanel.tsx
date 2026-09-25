@@ -17,6 +17,7 @@ export default function ChatPanel() {
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState("");
   const [docxPath, setDocxPath] = useState("");
+  const [citations, setCitations] = useState<{ source: string; score: number }[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [stageIndex, setStageIndex] = useState(0);
@@ -28,6 +29,7 @@ export default function ChatPanel() {
     setError("");
     setResponse("");
     setDocxPath("");
+    setCitations([]);
     setStageIndex(0);
 
     try {
@@ -68,10 +70,11 @@ export default function ChatPanel() {
           if (event.type === "step_complete") {
             const idx = STAGES.indexOf(event.node);
             if (idx !== -1) setStageIndex(idx);
-          } else if (event.type === "done") {
+            } else if (event.type === "done") {
             setStageIndex(STAGES.length - 1);
             setResponse(event.final_output ?? "");
             setDocxPath(event.docx_path ?? "");
+            setCitations(event.citations ?? []);
           } else if (event.type === "error") {
             throw new Error(event.detail ?? "Agent execution failed");
           }
@@ -163,6 +166,18 @@ export default function ChatPanel() {
               <p className="text-[15px] text-[#E7ECEF] leading-relaxed whitespace-pre-wrap">
                 {response}
               </p>
+                           {citations.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {citations.map((c, i) => (
+                    <span
+                      key={i}
+                      className="text-xs font-mono text-[#5B6670] border border-[#1E262C] rounded-sm px-2 py-1"
+                    >
+                      {c.source} · {c.score}
+                    </span>
+                  ))}
+                </div>
+              )}
               {docxPath && (
                 <p className="mt-3 text-xs text-[#5B6670] font-mono">
                   Generated document: {docxPath}
