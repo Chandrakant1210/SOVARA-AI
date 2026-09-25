@@ -4,6 +4,7 @@
 import { useState } from "react";
 import AgentTracker from "./AgentTracker";
 import { getToken } from "@/lib/api";
+import type { AgentResult } from "@/app/page";
 
 const EXAMPLES = [
   "Summarize the attached inspection report and flag anomalies",
@@ -13,7 +14,11 @@ const EXAMPLES = [
 
 const STAGES = ["understand", "plan", "retrieve", "reason", "validate", "generate"];
 
-export default function ChatPanel() {
+export default function ChatPanel({
+  onResult,
+}: {
+  onResult: (result: AgentResult) => void;
+}) {
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState("");
   const [docxPath, setDocxPath] = useState("");
@@ -70,11 +75,19 @@ export default function ChatPanel() {
           if (event.type === "step_complete") {
             const idx = STAGES.indexOf(event.node);
             if (idx !== -1) setStageIndex(idx);
-            } else if (event.type === "done") {
+          } else if (event.type === "done") {
             setStageIndex(STAGES.length - 1);
-            setResponse(event.final_output ?? "");
-            setDocxPath(event.docx_path ?? "");
-            setCitations(event.citations ?? []);
+            const finalResponse = event.final_output ?? "";
+            const finalDocxPath = event.docx_path ?? "";
+            const finalCitations = event.citations ?? [];
+            setResponse(finalResponse);
+            setDocxPath(finalDocxPath);
+            setCitations(finalCitations);
+            onResult({
+              response: finalResponse,
+              docxPath: finalDocxPath,
+              citations: finalCitations,
+            });
           } else if (event.type === "error") {
             throw new Error(event.detail ?? "Agent execution failed");
           }
@@ -166,7 +179,7 @@ export default function ChatPanel() {
               <p className="text-[15px] text-[#E7ECEF] leading-relaxed whitespace-pre-wrap">
                 {response}
               </p>
-                           {citations.length > 0 && (
+              {citations.length > 0 && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {citations.map((c, i) => (
                     <span
@@ -180,7 +193,7 @@ export default function ChatPanel() {
               )}
               {docxPath && (
                 <p className="mt-3 text-xs text-[#5B6670] font-mono">
-                  Generated document: {docxPath}
+                  Generated document: {docxPath} — review and approve in the Review tab.
                 </p>
               )}
             </div>

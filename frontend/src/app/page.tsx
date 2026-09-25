@@ -6,18 +6,25 @@ import TopNav from "@/components/TopNav";
 import ChatPanel from "@/components/ChatPanel";
 import SecurityPanel from "@/components/SecurityPanel";
 import LoginScreen from "@/components/LoginScreen";
+import ReviewPanel from "@/components/ReviewPanel";
 import { useAuth } from "@/lib/AuthContext";
 import DocumentsPanel from "@/components/DocumentsPanel";
 
 type Tab = "Chat" | "Documents" | "Review" | "Audit";
 
-const COMING_SOON: Record<Exclude<Tab, "Chat" | "Documents">, string> = {
-  Review: "Human approve / reject / modify screen — Day 6.",
+export type AgentResult = {
+  response: string;
+  docxPath: string;
+  citations: { source: string; score: number }[];
+};
+
+const COMING_SOON: Record<"Audit", string> = {
   Audit: "Full audit trail from PostgreSQL — Day 11.",
 };
 
 export default function Home() {
   const [tab, setTab] = useState<Tab>("Chat");
+  const [lastResult, setLastResult] = useState<AgentResult | null>(null);
   const { isAuthenticated, loading, logout } = useAuth();
 
   if (loading) {
@@ -65,13 +72,15 @@ export default function Home() {
 
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_380px] min-h-[calc(100vh-129px)]">
         {tab === "Chat" ? (
-          <ChatPanel />
+          <ChatPanel onResult={setLastResult} />
         ) : tab === "Documents" ? (
           <DocumentsPanel />
+        ) : tab === "Review" ? (
+          <ReviewPanel result={lastResult} onClear={() => setLastResult(null)} />
         ) : (
           <div className="flex items-center justify-center px-8">
             <p className="text-sm text-[#5B6670] max-w-sm text-center leading-relaxed">
-              {COMING_SOON[tab]}
+              {COMING_SOON.Audit}
             </p>
           </div>
         )}
