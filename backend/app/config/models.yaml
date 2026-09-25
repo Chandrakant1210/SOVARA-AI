@@ -1,37 +1,37 @@
-﻿# SOVARA AI — Model Registry
-# Defines available models, their capabilities, and how to reach them.
-# The router reads this file to select the right model for a task —
-# never hard-code a model name directly in application code.
-
-models:
-  qwen3-14b:
-    capability: reasoning
-    provider: ollama
-    model_name: "qwen3:14B"
-    description: "General reasoning, document analysis, planning, drafting"
-    context_length: 32768
-    available: false  # not yet pulled on this machine — flip to true once `ollama pull qwen3:14b` is run
-
-  qwen2.5-vl-7b:
-    capability: vision
-    provider: ollama
-    model_name: "qwen2.5vl:7b"
-    description: "Scanned documents, images, engineering drawings, P&IDs"
-    context_length: 32768
-    available: false  # verify with `ollama list` — flip to true once confirmed pulled
-
-  qwen2.5-coder-14b:
-    capability: coding
-    provider: ollama
-    model_name: "qwen2.5-coder:14b"
-    description: "Code generation, debugging, code explanation"
-    context_length: 32768
-    available: false  # not yet pulled — pluggable placeholder
-
-  qwen3-8b:
-    capability: reasoning
-    provider: ollama
-    model_name: "qwen3:8b"
-    description: "General reasoning, document analysis, planning, drafting — currently the only reasoning model confirmed available on this hardware"
-    context_length: 32768
-    available: true  # confirmed pulled via `ollama list`
+# SOVARA AI — Model Registry
+# Defines available models, their capabilities, and how to reach them.
+# The router reads this file to select the right model for a task —
+# never hard-code a model name directly in application code.
+
+models:
+  qwen3-14b:
+    capability: reasoning
+    provider: ollama
+    model_name: "qwen3:14B"
+    description: "General reasoning, document analysis, planning, drafting"
+    context_length: 32768
+    available: true  # not yet pulled on this machine — flip to true once `ollama pull qwen3:14b` is run
+
+  qwen2.5-vl-7b:
+    capability: vision
+    provider: ollama
+    model_name: "qwen2.5vl:7b"
+    description: "Scanned documents, images, engineering drawings, P&IDs"
+    context_length: 32768
+    available: false  # verify with `ollama list` — flip to true once confirmed pulled
+
+  qwen2.5-coder-14b:
+    capability: coding
+    provider: ollama
+    model_name: "qwen2.5-coder:14b"
+    description: "Code generation, debugging, code explanation"
+    context_length: 32768
+    available: false  # not yet pulled — pluggable placeholder
+
+  qwen3-8b:
+    capability: reasoning
+    provider: ollama
+    model_name: "qwen3:8b"
+    description: "General reasoning, document analysis, planning, drafting — currently the only reasoning model confirmed available on this hardware"
+    context_length: 32768
+    available: false  # confirmed pulled via `ollama list`

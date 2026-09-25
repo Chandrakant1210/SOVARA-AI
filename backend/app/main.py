@@ -7,6 +7,7 @@ from app.api.retrieve import router as retrieve_router
 from app.api.agent import router as agent_router
 from app.api.security import router as security_router
 from app.api.sandbox import router as sandbox_router
+from app.api.review import router as review_router
 
 app = FastAPI(title="SOVARA AI Backend", version="0.1.0")
 
@@ -25,6 +26,7 @@ app.include_router(retrieve_router, prefix="/api")
 app.include_router(agent_router, prefix="/api")
 app.include_router(security_router, prefix="/api")
 app.include_router(sandbox_router, prefix="/api")
+app.include_router(review_router, prefix="/api")
 
 
 @app.get("/health")

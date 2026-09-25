@@ -29,6 +29,11 @@ class AgentState(TypedDict):
     # Set by the Retrieve node: relevant context pulled from private
     # knowledge (RAG). Empty list if no retrieval was needed/available.
     retrieved_context: Optional[list]
+ 
+    # Set by the Retrieve node: structured citation data (source filename
+    # + similarity score) for each retrieved chunk, so the frontend can
+    # display real citations instead of just the raw text.
+    citations: Optional[list]   
 
     # Set by the Reason node: the agent's analysis and recommendation,
     # grounded in document_text and retrieved_context.
