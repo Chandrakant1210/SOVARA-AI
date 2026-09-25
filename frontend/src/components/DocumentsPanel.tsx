@@ -8,6 +8,7 @@ type UploadedDoc = {
     id: string;
     filename: string;
     extractedText: string;
+    indexedChunks: number;
     status: "processing" | "done" | "error";
     error?: string;
 };
@@ -24,7 +25,7 @@ export default function DocumentsPanel() {
         const tempId = crypto.randomUUID();
 
         setDocs((prev) => [
-            { id: tempId, filename: file.name, extractedText: "", status: "processing" },
+            { id: tempId, filename: file.name, extractedText: "", indexedChunks: 0, status: "processing" },
             ...prev,
         ]);
 
@@ -45,13 +46,17 @@ export default function DocumentsPanel() {
                 throw new Error(message);
             }
 
-
             const data = await res.json();
 
             setDocs((prev) =>
                 prev.map((d) =>
                     d.id === tempId
-                        ? { ...d, extractedText: data.extracted_text, status: "done" }
+                        ? {
+                            ...d,
+                            extractedText: data.extracted_text,
+                            indexedChunks: data.indexed_chunks,
+                            status: "done",
+                        }
                         : d
                 )
             );
@@ -90,7 +95,8 @@ export default function DocumentsPanel() {
                 <p className="mt-2 text-sm text-[#8B98A3] leading-relaxed">
                     Upload scanned inspection reports, drawings, or SOPs. Processed
                     locally with OCR and vision extraction — nothing leaves this
-                    network.
+                    network. Uploaded documents are also indexed so SOVARA&apos;s
+                    assistant can answer questions about them.
                 </p>
 
                 <div
@@ -175,6 +181,11 @@ export default function DocumentsPanel() {
                                     </span>
                                     <p className="text-[15px] text-[#E7ECEF] leading-relaxed whitespace-pre-wrap max-h-64 overflow-y-auto">
                                         {doc.extractedText || "(no text extracted)"}
+                                    </p>
+                                    <p className="mt-3 text-xs font-mono text-[#2FD9C3]">
+                                        {doc.indexedChunks > 0
+                                            ? `Indexed as ${doc.indexedChunks} chunk${doc.indexedChunks === 1 ? "" : "s"} — searchable by SOVARA's assistant.`
+                                            : "Not indexed for retrieval (no text extracted)."}
                                     </p>
                                 </div>
                             )}
