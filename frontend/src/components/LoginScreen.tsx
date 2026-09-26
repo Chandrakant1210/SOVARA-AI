@@ -36,25 +36,25 @@ export default function LoginScreen() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-8 bg-[#0A0E12]"
+      className="min-h-screen flex items-center justify-center px-8 bg-[var(--bg)]"
       style={{
-        backgroundImage: "radial-gradient(circle, #161C22 1px, transparent 1px)",
+        backgroundImage: "radial-gradient(circle, var(--border) 1px, transparent 1px)",
         backgroundSize: "28px 28px",
       }}
     >
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <h1 className="text-lg font-semibold text-[#E7ECEF] tracking-tight">
+          <h1 className="text-lg font-semibold text-[var(--text-primary)] tracking-tight">
             SOVARA
           </h1>
-          <p className="mt-1 text-sm text-[#5B6670]">
+          <p className="mt-1 text-sm text-[var(--text-muted)]">
             Sign in to the sovereign AI workbench
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <div>
-            <label className="block text-xs font-mono text-[#5B6670] mb-1.5">
+            <label className="block text-xs font-mono text-[var(--text-muted)] mb-1.5">
               email
             </label>
             <input
@@ -62,13 +62,13 @@ export default function LoginScreen() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-sm bg-[#10151A] border border-[#1E262C] text-[#E7ECEF] placeholder:text-[#5B6670] px-3 py-2.5 text-[15px] focus:outline-none focus:border-[#2FD9C3]/60 transition-colors"
+              className="w-full rounded-sm bg-[var(--panel)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] px-3 py-2.5 text-[15px] focus:outline-none focus:border-[var(--accent)]/60 transition-colors"
               placeholder="engineer@mrpl.com"
             />
           </div>
 
           <div>
-            <label className="block text-xs font-mono text-[#5B6670] mb-1.5">
+            <label className="block text-xs font-mono text-[var(--text-muted)] mb-1.5">
               password
             </label>
             <input
@@ -76,13 +76,13 @@ export default function LoginScreen() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-sm bg-[#10151A] border border-[#1E262C] text-[#E7ECEF] placeholder:text-[#5B6670] px-3 py-2.5 text-[15px] focus:outline-none focus:border-[#2FD9C3]/60 transition-colors"
+              className="w-full rounded-sm bg-[var(--panel)] border border-[var(--border)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] px-3 py-2.5 text-[15px] focus:outline-none focus:border-[var(--accent)]/60 transition-colors"
               placeholder="••••••••"
             />
           </div>
 
           {error && (
-            <div className="rounded-sm border border-[#4A2A2A] bg-[#1A1010] p-3 text-sm text-[#E5A3A3]">
+            <div className="rounded-sm border border-[var(--error-border)] bg-[var(--error-bg)] p-3 text-sm text-[var(--error-text)]">
               {error}
             </div>
           )}
@@ -90,7 +90,7 @@ export default function LoginScreen() {
           <button
             type="submit"
             disabled={loading}
-            className="mt-2 bg-[#2FD9C3] text-[#0A0E12] font-medium text-sm px-5 py-2.5 rounded-sm hover:bg-[#4FE5D1] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="mt-2 bg-[var(--accent)] text-[var(--accent-fg)] font-medium text-sm px-5 py-2.5 rounded-sm hover:opacity-90 disabled:opacity-30 disabled:cursor-not-allowed transition-opacity"
           >
             {loading
               ? mode === "register"
@@ -107,7 +107,7 @@ export default function LoginScreen() {
               setMode(mode === "login" ? "register" : "login");
               setError("");
             }}
-            className="text-xs text-[#5B6670] hover:text-[#8B98A3] transition-colors mt-1"
+            className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors mt-1"
           >
             {mode === "login"
               ? "New here? Create an account"
@@ -115,7 +115,7 @@ export default function LoginScreen() {
           </button>
         </form>
 
-        <p className="mt-8 text-xs text-[#5B6670] text-center leading-relaxed">
+        <p className="mt-8 text-xs text-[var(--text-muted)] text-center leading-relaxed">
           All authentication happens on local infrastructure.
           <br />
           No credentials leave MRPL&apos;s network.

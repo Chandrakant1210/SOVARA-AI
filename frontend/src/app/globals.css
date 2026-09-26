@@ -1,7 +1,53 @@
 @import "tailwindcss";
 
+:root {
+  --bg: #14181A;
+  --panel: #1C2224;
+  --border: #2A3234;
+  --text-primary: #EDEAE4;
+  --text-secondary: #A8ACA4;
+  --text-muted: #6B726C;
+  --text-faint: #454B47;
+  --accent: #8AA494;
+  --accent-fg: #14181A;
+  --accent-2: #78AAA1;
+  --accent-3: #CDB499;
+  --accent-4: #B8C5B9;
+  --accent-soft-bg: #22302A;
+  --error-border: #5A3A32;
+  --error-bg: #241713;
+  --error-text: #E5A88A;
+}
+
+[data-theme="light"] {
+  --bg: #F5F1EA;
+  --panel: #FFFFFF;
+  --border: #E2DACD;
+  --text-primary: #2B2A25;
+  --text-secondary: #5C5A52;
+  --text-muted: #8C887E;
+  --text-faint: #C4BEB0;
+  --accent: #6E8C7C;
+  --accent-fg: #FBF9F5;
+  --accent-2: #4E8478;
+  --accent-3: #B08D5D;
+  --accent-4: #8A9A8D;
+  --accent-soft-bg: #E7EEE9;
+  --error-border: #D9B8A8;
+  --error-bg: #FBEEE7;
+  --error-text: #A34E2E;
+}
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
 body {
   font-family: var(--font-sans), system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text-primary);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .font-mono {

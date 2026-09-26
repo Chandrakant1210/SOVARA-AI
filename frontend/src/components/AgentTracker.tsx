@@ -21,26 +21,28 @@ export default function AgentTracker({ activeIndex }: { activeIndex: number }) {
             <div className="flex flex-col items-start gap-1.5 min-w-fit">
               <span
                 className={`h-1.5 w-1.5 rounded-full transition-colors ${
-                  done
-                    ? "bg-[#2FD9C3]"
-                    : active
-                    ? "bg-[#2FD9C3] animate-pulse"
-                    : "bg-[#1E262C]"
+                  active ? "animate-pulse" : ""
                 }`}
+                style={{
+                  backgroundColor: done || active ? "var(--accent)" : "var(--border)",
+                }}
               />
               <span
-                className={`text-xs font-mono whitespace-nowrap transition-colors ${
-                  done || active ? "text-[#8B98A3]" : "text-[#3A434B]"
-                }`}
+                className="text-xs font-mono whitespace-nowrap transition-colors"
+                style={{
+                  color: done || active ? "var(--text-secondary)" : "var(--text-faint)",
+                }}
               >
                 {stage}
               </span>
             </div>
             {i < STAGES.length - 1 && (
               <div
-                className={`h-px flex-1 mx-2 mb-4 transition-colors ${
-                  done ? "bg-[#2FD9C3]/40" : "bg-[#1E262C]"
-                }`}
+                className="h-px flex-1 mx-2 mb-4 transition-colors"
+                style={{
+                  backgroundColor: done ? "var(--accent)" : "var(--border)",
+                  opacity: done ? 0.4 : 1,
+                }}
               />
             )}
           </div>
