@@ -13,6 +13,7 @@ from app.services.ocr_service import (
     extract_text_with_fallback,
     analyze_page,
 )
+from app.services.scan_extraction_service import extract_inspection_report, REVIEW_CONFIDENCE
 from app.services.embedding_service import get_embedding
 from app.services.qdrant_service import ensure_collection, upsert_chunks
 from app.core.database import get_db
@@ -31,8 +32,8 @@ UPLOAD_ROOT = os.path.realpath(UPLOAD_DIR)
 # Roles allowed to see every document; everyone else sees only their own.
 PRIVILEGED_ROLES = {UserRole.ADMIN, UserRole.MANAGER}
 
-# OCR lines below this PaddleOCR confidence are flagged for human review.
-LOW_CONFIDENCE_THRESHOLD = 0.85
+# Single source of truth: same threshold as the extraction service.
+LOW_CONFIDENCE_THRESHOLD = REVIEW_CONFIDENCE
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".pdf"}
 
@@ -244,18 +245,22 @@ def analyze_document_page(
     """
     document = _get_accessible_document(document_id, current_user, db)
     file_path = _resolve_upload_path(document.file_path)
+    doc_id, filename = str(document.id), document.filename
+    # Release the DB connection before slow OCR so queued requests
+    # can't exhaust the connection pool.
+    db.close()
 
     try:
         result = analyze_page(file_path, page_index)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.exception("Page analysis failed for document %s page %s", document.id, page_index)
+        logger.exception("Page analysis failed for document %s page %s", doc_id, page_index)
         raise HTTPException(status_code=500, detail=f"Page analysis failed: {str(e)}")
 
     return PageAnalysisResponse(
-        document_id=str(document.id),
-        filename=document.filename,
+        document_id=doc_id,
+        filename=filename,
         page_index=result["page_index"],
         page_count=result["page_count"],
         width=result["width"],
@@ -265,3 +270,43 @@ def analyze_document_page(
         lines=[OcrLine(**line) for line in result["lines"]],
         image_base64=base64.b64encode(result["image_png"]).decode("ascii"),
     )
+
+
+# Caps OCR work per extraction request.
+MAX_EXTRACTION_PAGES = 10
+
+
+@router.get("/documents/{document_id}/extraction")
+def extract_document_fields(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Runs OCR on every page (up to MAX_EXTRACTION_PAGES) and returns
+    structured fields, thickness readings and validation checks. Every
+    value points to its source OCR line (page is 1-based).
+    """
+    document = _get_accessible_document(document_id, current_user, db)
+    file_path = _resolve_upload_path(document.file_path)
+    doc_id, filename = str(document.id), document.filename
+    # Release the DB connection before slow OCR (see analyze_document_page).
+    db.close()
+
+    try:
+        first = analyze_page(file_path, 0)
+        page_total = min(first["page_count"], MAX_EXTRACTION_PAGES)
+        pages = [first] + [analyze_page(file_path, i) for i in range(1, page_total)]
+    except Exception as e:
+        logger.exception("Extraction OCR failed for document %s", doc_id)
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+    lines = [{"page": p["page_index"] + 1, **line} for p in pages for line in p["lines"]]
+    result = extract_inspection_report(lines)
+    result.update({
+        "document_id": doc_id,
+        "filename": filename,
+        "page_count": first["page_count"],
+        "pages_analyzed": len(pages),
+    })
+    return result
