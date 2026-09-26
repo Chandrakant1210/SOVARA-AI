@@ -90,3 +90,74 @@ def extract_text_with_fallback(file_path: str) -> str:
         return ocr_text
 
     return extract_text_with_vision(file_path)
+
+
+
+
+    # ---------------------------------------------------------------------------
+# Structured page analysis (Scan Analysis view)
+# Keeps what the text-only functions above discard: per-line bounding boxes
+# and PaddleOCR confidence scores. These are real OCR measurements.
+# ---------------------------------------------------------------------------
+
+# Caps render size so very large pages don't exhaust memory or slow OCR.
+MAX_RENDER_SIDE = 2400
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def analyze_page(file_path: str, page_index: int = 0) -> dict:
+    """
+    Renders one page (PDF page or image file) and runs PaddleOCR on it.
+
+    Returns the rendered page as PNG bytes, the page count, and every
+    detected text line with its PaddleOCR confidence and a bounding box
+    normalized to 0-1 relative to the rendered page.
+    Raises ValueError if page_index is out of range.
+    """
+    doc = fitz.open(file_path)  # opens PDFs and common image formats alike
+    try:
+        page_count = len(doc)
+        if not 0 <= page_index < page_count:
+            raise ValueError(
+                f"page_index {page_index} out of range (0-{page_count - 1})"
+            )
+
+        page = doc[page_index]
+        longest = max(page.rect.width, page.rect.height)
+        zoom = min(2.0, MAX_RENDER_SIDE / longest) if longest else 2.0
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(
+            pix.height, pix.width, pix.n
+        )
+
+        result = _ocr_engine.ocr(img, cls=True)
+        raw_lines = result[0] if result and result[0] else []
+
+        lines = []
+        for box, (text, score) in raw_lines:
+            xs = [p[0] for p in box]
+            ys = [p[1] for p in box]
+            lines.append({
+                "text": text,
+                "confidence": round(float(score), 4),
+                "bbox": [
+                    round(_clamp01(min(xs) / pix.width), 4),
+                    round(_clamp01(min(ys) / pix.height), 4),
+                    round(_clamp01(max(xs) / pix.width), 4),
+                    round(_clamp01(max(ys) / pix.height), 4),
+                ],
+            })
+
+        return {
+            "page_index": page_index,
+            "page_count": page_count,
+            "width": pix.width,
+            "height": pix.height,
+            "lines": lines,
+            "image_png": pix.tobytes("png"),
+        }
+    finally:
+        doc.close()
