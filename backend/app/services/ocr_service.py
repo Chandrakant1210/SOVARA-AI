@@ -1,4 +1,8 @@
-﻿import numpy as np
+﻿import os
+import threading
+from collections import OrderedDict
+
+import numpy as np
 import fitz  # PyMuPDF
 import ollama
 from paddleocr import PaddleOCR
@@ -7,6 +11,18 @@ from app.config.model_registry import get_model_for_capability
 # Initialize once at module load — loading the model is expensive,
 # we don't want to reload it on every request.
 _ocr_engine = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+
+# PaddleOCR's predictor is not thread-safe. FastAPI runs sync endpoints in a
+# thread pool, so concurrent requests (e.g. page analysis + extraction) could
+# corrupt each other's results. Serialize all OCR calls through one lock.
+# Re-entrant, because the cached analyze_page() holds it while calling _run_ocr().
+_ocr_lock = threading.RLock()
+
+
+def _run_ocr(image, cls: bool = True):
+    with _ocr_lock:
+        return _ocr_engine.ocr(image, cls=cls)
+
 
 # Threshold below which PaddleOCR output is considered too weak to trust —
 # triggers a fallback to the vision model.
@@ -28,7 +44,7 @@ def extract_text_from_pdf(file_path: str) -> str:
             pix.height, pix.width, pix.n
         )
 
-        result = _ocr_engine.ocr(img_array, cls=True)
+        result = _run_ocr(img_array, cls=True)
         if result and result[0]:
             page_text = "\n".join(line[1][0] for line in result[0])
             all_text.append(f"--- Page {page_num + 1} ---\n{page_text}")
@@ -42,7 +58,7 @@ def extract_text_from_image(file_path: str) -> str:
     Runs OCR on an image file and returns the extracted text,
     concatenated line by line.
     """
-    result = _ocr_engine.ocr(file_path, cls=True)
+    result = _run_ocr(file_path, cls=True)
 
     if not result or not result[0]:
         return ""
@@ -92,9 +108,7 @@ def extract_text_with_fallback(file_path: str) -> str:
     return extract_text_with_vision(file_path)
 
 
-
-
-    # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Structured page analysis (Scan Analysis view)
 # Keeps what the text-only functions above discard: per-line bounding boxes
 # and PaddleOCR confidence scores. These are real OCR measurements.
@@ -108,7 +122,7 @@ def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-def analyze_page(file_path: str, page_index: int = 0) -> dict:
+def _analyze_page_uncached(file_path: str, page_index: int = 0) -> dict:
     """
     Renders one page (PDF page or image file) and runs PaddleOCR on it.
 
@@ -133,7 +147,7 @@ def analyze_page(file_path: str, page_index: int = 0) -> dict:
             pix.height, pix.width, pix.n
         )
 
-        result = _ocr_engine.ocr(img, cls=True)
+        result = _run_ocr(img, cls=True)
         raw_lines = result[0] if result and result[0] else []
 
         lines = []
@@ -161,3 +175,25 @@ def analyze_page(file_path: str, page_index: int = 0) -> dict:
         }
     finally:
         doc.close()
+
+
+# Page results are cached: an uploaded file never changes, so repeated or
+# duplicate requests (page switching, reloads, React dev double-fetch) return
+# instantly instead of queueing behind the OCR lock. In-memory only, bounded.
+_PAGE_CACHE: "OrderedDict[tuple, dict]" = OrderedDict()
+_PAGE_CACHE_MAX = 32
+
+
+def analyze_page(file_path: str, page_index: int = 0) -> dict:
+    """Cached wrapper around _analyze_page_uncached (same return value)."""
+    key = (os.path.abspath(file_path), os.path.getmtime(file_path), page_index)
+    with _ocr_lock:
+        cached = _PAGE_CACHE.get(key)
+        if cached is not None:
+            _PAGE_CACHE.move_to_end(key)
+            return cached
+        result = _analyze_page_uncached(file_path, page_index)
+        _PAGE_CACHE[key] = result
+        if len(_PAGE_CACHE) > _PAGE_CACHE_MAX:
+            _PAGE_CACHE.popitem(last=False)
+        return result
