@@ -24,7 +24,13 @@ from app.services.scan_extraction_service import (
 )
 from app.services.audit_service import record, record_standalone
 from app.services.embedding_service import get_embedding
-from app.services.qdrant_service import PRIVATE, ensure_collection, upsert_chunks
+from app.services.qdrant_service import (
+    PRIVATE,
+    count_document_chunks,
+    delete_by_document,
+    ensure_collection,
+    upsert_chunks,
+)
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
@@ -71,6 +77,11 @@ class DocumentSummary(BaseModel):
     filename: str
     created_at: datetime | None
     uploaded_by: str | None
+    owner: str | None = None          # uploader's email
+    kind: str = "file"                # "pdf" or "image"
+    text_chars: int = 0               # length of the extracted text
+    indexed_chunks: int | None = None # from Qdrant; None if the index is unreachable
+    can_delete: bool = False
 
 
 class OcrLine(BaseModel):
@@ -238,6 +249,11 @@ def upload_document(
     )
 
 
+def _can_delete(document: Document, user: User) -> bool:
+    # Same rule as reading: the owner, managers and admins.
+    return _can_access(document, user)
+
+
 @router.get("/documents", response_model=list[DocumentSummary])
 def list_documents(
     current_user: User = Depends(get_current_user),
@@ -249,15 +265,87 @@ def list_documents(
         query = query.filter(Document.uploaded_by == current_user.id)
     documents = query.order_by(Document.created_at.desc()).limit(100).all()
 
+    owner_ids = {d.uploaded_by for d in documents if d.uploaded_by}
+    emails = {str(u.id): u.email for u in db.query(User).filter(User.id.in_(owner_ids)).all()} if owner_ids else {}
+
+    def chunks(doc_id: str) -> int | None:
+        try:
+            return count_document_chunks(doc_id)
+        except Exception:
+            return None  # index unreachable: show "unknown", don't fail the list
+
     return [
         DocumentSummary(
             id=str(d.id),
             filename=d.filename,
             created_at=d.created_at,
             uploaded_by=str(d.uploaded_by) if d.uploaded_by else None,
+            owner=emails.get(str(d.uploaded_by)) if d.uploaded_by else None,
+            kind="pdf" if d.filename.lower().endswith(".pdf") else "image",
+            text_chars=len(d.extracted_text or ""),
+            indexed_chunks=chunks(str(d.id)),
+            can_delete=_can_delete(d, current_user),
         )
         for d in documents
     ]
+
+
+@router.get("/documents/{document_id}/text")
+def document_text(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The text extracted at upload (for the Document Vault expand view)."""
+    document = _get_accessible_document(document_id, current_user, db)
+    return {"id": str(document.id), "filename": document.filename, "text": document.extracted_text or ""}
+
+
+@router.delete("/documents/{document_id}")
+def delete_document(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Deletes a document: its search-index chunks, the stored file and the
+    database record. The audit event is written FIRST (fail-closed), so
+    nothing is deleted without a record. Earlier audit events about the
+    document are kept; audit history is never rewritten.
+    """
+    document = _get_accessible_document(document_id, current_user, db)  # 404 if not allowed
+    if not _can_delete(document, current_user):
+        raise HTTPException(status_code=403, detail="You can't delete this document")
+    doc_id, filename, stored_path = str(document.id), document.filename, document.file_path
+
+    try:
+        record(db, current_user.id, "document.delete", {
+            "summary": f"Deleted {filename}", "tool": "Document Vault", "result": "deleted",
+            "document_id": doc_id,
+        })
+    except Exception:
+        db.rollback()
+        logger.exception("Audit write failed; refusing deletion")
+        raise HTTPException(status_code=503, detail="Audit log unavailable; the document was not deleted")
+
+    try:
+        delete_by_document(doc_id)
+        try:
+            os.remove(_resolve_upload_path(stored_path))
+        except HTTPException:
+            pass  # file already missing on disk; continue removing the record
+        db.delete(document)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.exception("Deletion failed for document %s", doc_id)
+        record_standalone(current_user.id, "document.delete", {
+            "summary": f"Deletion of {filename} failed", "tool": "Document Vault", "result": "failed",
+            "document_id": doc_id, "error": str(e),
+        })
+        raise HTTPException(status_code=500, detail=f"Deletion failed: {str(e)}")
+
+    return {"deleted": True, "id": doc_id, "filename": filename}
 
 
 @router.get(

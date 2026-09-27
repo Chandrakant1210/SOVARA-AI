@@ -141,6 +141,20 @@ def delete_by_source(source_filename: str, visibility: str) -> None:
     )
 
 
+def _document_filter(document_id: str) -> Filter:
+    return Filter(must=[FieldCondition(key="document_id", match=MatchValue(value=str(document_id)))])
+
+
+def count_document_chunks(document_id: str) -> int:
+    """Number of indexed chunks for one uploaded document."""
+    return client.count(collection_name=COLLECTION_NAME, count_filter=_document_filter(document_id), exact=True).count
+
+
+def delete_by_document(document_id: str) -> None:
+    """Removes every chunk of one uploaded document from the index."""
+    client.delete(collection_name=COLLECTION_NAME, points_selector=FilterSelector(filter=_document_filter(document_id)))
+
+
 def recreate_collection() -> None:
     """Drops and recreates the collection (operator re-index only)."""
     if COLLECTION_NAME in [c.name for c in client.get_collections().collections]:
