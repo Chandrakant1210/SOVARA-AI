@@ -24,7 +24,7 @@ from app.services.scan_extraction_service import (
 )
 from app.services.audit_service import record, record_standalone
 from app.services.embedding_service import get_embedding
-from app.services.qdrant_service import ensure_collection, upsert_chunks
+from app.services.qdrant_service import PRIVATE, ensure_collection, upsert_chunks
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
@@ -92,12 +92,12 @@ class PageAnalysisResponse(BaseModel):
     image_base64: str  # PNG; sent inline because <img src> can't carry the JWT
 
 
-def _index_text(text: str, source_filename: str) -> int:
+def _index_text(text: str, source_filename: str, *, document_id: str, owner_id: str) -> int:
     """
     Chunks the extracted text, embeds each chunk, and stores it in
-    Qdrant so the agent's retrieval can find it in future queries.
-    Returns the number of chunks indexed (0 if there was nothing
-    meaningful to index).
+    Qdrant as PRIVATE to the uploader, so retrieval only returns it to
+    the owner, managers and admins. Returns the number of chunks indexed
+    (0 if there was nothing meaningful to index).
     """
     if not text or not text.strip():
         return 0
@@ -108,7 +108,8 @@ def _index_text(text: str, source_filename: str) -> int:
 
     ensure_collection()
     embeddings = [get_embedding(chunk) for chunk in chunks]
-    upsert_chunks(chunks, embeddings, source_filename=source_filename)
+    upsert_chunks(chunks, embeddings, source_filename=source_filename,
+                  document_id=document_id, owner_id=owner_id, visibility=PRIVATE)
     return len(chunks)
 
 
@@ -217,7 +218,8 @@ def upload_document(
     # the user still gets their extracted text either way, just a note
     # that it wasn't searchable.
     try:
-        indexed_chunks = _index_text(extracted_text, source_filename=file.filename)
+        indexed_chunks = _index_text(extracted_text, source_filename=file.filename,
+                                     document_id=str(document.id), owner_id=str(current_user.id))
     except Exception:
         logger.exception("Indexing failed for document %s", document.id)
         indexed_chunks = 0
