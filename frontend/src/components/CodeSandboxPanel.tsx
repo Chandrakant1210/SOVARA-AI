@@ -67,7 +67,7 @@ type GenerateResult = {
 // ---------- helpers ----------
 
 const STARTER_CODE = `# Describe a task above to generate code with the local model,
-# or write Python here. Functions named test_* run with pytest.
+# write Python here, or load a reviewed example. Functions named test_* run with pytest.
 
 def add(a, b):
     return a + b
@@ -76,10 +76,126 @@ def test_add():
     assert add(2, 3) == 5
 `;
 
+// Engineer-reviewed calculation scripts (not AI-generated). Used to show a
+// deterministic, verified sandbox run, e.g. re-checking the V-301 report figures.
+const EXAMPLES: { id: string; label: string; filename: string; code: string }[] = [
+  {
+    id: "remaining-life",
+    label: "Corrosion rate & remaining life (V-301 CML-06)",
+    filename: "remaining_life.py",
+    code: `# Reviewed example: corrosion rate and remaining life (API 510 style).
+# Values from the V-301 sample report, CML-06.
+import pytest
+
+
+def corrosion_rate(previous_mm: float, current_mm: float, years: float) -> float:
+    """Short-term corrosion rate in mm/year."""
+    if years <= 0:
+        raise ValueError("years between inspections must be positive")
+    if previous_mm <= 0 or current_mm <= 0:
+        raise ValueError("thickness readings must be positive")
+    return (previous_mm - current_mm) / years
+
+
+def remaining_life(current_mm: float, t_min_mm: float, rate_mm_per_year: float) -> float:
+    """Years until the wall reaches t-min at the given corrosion rate."""
+    if current_mm <= t_min_mm:
+        return 0.0  # already at or below t-min
+    if rate_mm_per_year <= 0:
+        return float("inf")  # no measurable corrosion
+    return (current_mm - t_min_mm) / rate_mm_per_year
+
+
+def test_v301_cml06_rate():
+    assert corrosion_rate(14.1, 13.1, 3.0) == pytest.approx((14.1 - 13.1) / 3.0)
+
+
+def test_v301_cml06_remaining_life():
+    rate = corrosion_rate(14.1, 13.1, 3.0)
+    assert remaining_life(13.1, 12.5, rate) == pytest.approx((13.1 - 12.5) / rate)
+    assert remaining_life(13.1, 12.5, rate) == pytest.approx(1.8, abs=0.05)  # as stated in the report
+
+
+def test_at_or_below_tmin_has_no_life_left():
+    assert remaining_life(12.5, 12.5, 0.33) == 0.0
+    assert remaining_life(12.0, 12.5, 0.33) == 0.0
+
+
+def test_no_corrosion_means_unlimited_life():
+    assert remaining_life(15.0, 12.5, 0.0) == float("inf")
+
+
+def test_invalid_interval_rejected():
+    with pytest.raises(ValueError):
+        corrosion_rate(14.1, 13.1, 0)
+`,
+  },
+  {
+    id: "ug27",
+    label: "Minimum shell thickness, ASME VIII-1 UG-27",
+    filename: "ug27_thickness.py",
+    code: `# Reviewed example: minimum required shell thickness, circumferential stress,
+# ASME Section VIII Div. 1 UG-27(c)(1):  t = P*R / (S*E - 0.6*P) + CA
+# Units: P and S in MPa, R (inside radius), CA and t in mm. E = joint efficiency (0-1].
+import pytest
+
+
+def min_shell_thickness(P: float, R: float, S: float, E: float, CA: float = 0.0) -> float:
+    if P <= 0 or R <= 0 or S <= 0:
+        raise ValueError("P, R and S must be positive")
+    if not 0 < E <= 1:
+        raise ValueError("joint efficiency E must be in (0, 1]")
+    if CA < 0:
+        raise ValueError("corrosion allowance can't be negative")
+    if S * E <= 0.6 * P:
+        raise ValueError("formula not valid: S*E must exceed 0.6*P")
+    return P * R / (S * E - 0.6 * P) + CA
+
+
+def test_typical_vessel():
+    P, R, S, E, CA = 1.03, 750.0, 138.0, 0.85, 3.0
+    assert min_shell_thickness(P, R, S, E, CA) == pytest.approx(P * R / (S * E - 0.6 * P) + CA)
+
+
+def test_corrosion_allowance_adds_directly():
+    base = min_shell_thickness(1.03, 750.0, 138.0, 0.85, 0.0)
+    assert min_shell_thickness(1.03, 750.0, 138.0, 0.85, 3.0) == pytest.approx(base + 3.0)
+
+
+def test_full_radiography_needs_less_thickness():
+    assert min_shell_thickness(1.03, 750.0, 138.0, 1.0) < min_shell_thickness(1.03, 750.0, 138.0, 0.85)
+
+
+def test_invalid_inputs_rejected():
+    with pytest.raises(ValueError):
+        min_shell_thickness(-1.0, 750.0, 138.0, 0.85)
+    with pytest.raises(ValueError):
+        min_shell_thickness(1.03, 750.0, 138.0, 1.2)
+    with pytest.raises(ValueError):
+        min_shell_thickness(100.0, 750.0, 50.0, 0.85)  # S*E <= 0.6*P
+`,
+  },
+];
+
 async function readError(res: Response): Promise<string> {
   const body = await res.json().catch(() => null);
   if (Array.isArray(body?.detail)) return body.detail.map((e: { msg: string }) => e.msg).join(", ");
   return body?.detail ?? `Request failed with status ${res.status}`;
+}
+
+// One chip per source document (search may return up to 2 chunks per document).
+function uniqueSources(sources: { source: string; score: number }[]) {
+  const bySource = new Map<string, { source: string; score: number; chunks: number }>();
+  for (const s of sources) {
+    const seen = bySource.get(s.source);
+    if (seen) {
+      seen.chunks += 1;
+      seen.score = Math.max(seen.score, s.score);
+    } else {
+      bySource.set(s.source, { ...s, chunks: 1 });
+    }
+  }
+  return Array.from(bySource.values());
 }
 
 function formatMemory(limit: string): string {
@@ -259,9 +375,9 @@ export default function CodeSandboxPanel() {
                 attempt {a.attempt}: {a.timed_out ? "timed out" : a.test_summary ?? `exit ${a.exit_code}`}
               </span>
             ))}
-            {route.sources.map((src) => (
+            {uniqueSources(route.sources).map((src) => (
               <span key={src.source} className="text-[11px] font-mono px-2 py-0.5 rounded" style={{ background: "var(--bg)", color: "var(--text-secondary)" }} title="Reference material given to the model (access-filtered)">
-                ref: {src.source} &middot; {src.score.toFixed(2)}
+                ref: {src.source} &middot; {src.score.toFixed(2)}{src.chunks > 1 ? ` \u00b7 ${src.chunks} chunks` : ""}
               </span>
             ))}
             {route.reference_note && <span className="text-[11px]" style={{ color: "var(--accent-3)" }}>{route.reference_note}</span>}
@@ -283,7 +399,28 @@ export default function CodeSandboxPanel() {
         {/* Editor */}
         <div className="rounded-xl border p-4" style={cardStyle}>
           <div className="flex items-center justify-between pb-3 mb-2 border-b" style={{ borderColor: "var(--border)" }}>
-            <span className="text-sm font-mono" style={{ color: "var(--accent-2)" }}>{filename}</span>
+            <span className="flex items-center gap-3 min-w-0">
+              <span className="text-sm font-mono truncate" style={{ color: "var(--accent-2)" }}>{filename}</span>
+              <select
+                value=""
+                onChange={(e) => {
+                  const ex = EXAMPLES.find((x) => x.id === e.target.value);
+                  if (!ex) return;
+                  setCode(ex.code);
+                  setFilename(ex.filename);
+                  setRoute(null);
+                  setResult(null);
+                  setError(null);
+                }}
+                disabled={busy}
+                className="text-xs rounded border px-2 py-1 focus:outline-none"
+                style={{ borderColor: "var(--border)", background: "var(--panel)", color: "var(--text-secondary)" }}
+                aria-label="Load a reviewed example"
+              >
+                <option value="">Load reviewed example...</option>
+                {EXAMPLES.map((ex) => <option key={ex.id} value={ex.id}>{ex.label}</option>)}
+              </select>
+            </span>
             <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>{info?.python_version ? `Python ${info.python_version}` : "Python"}</span>
           </div>
           <CodeMirror

@@ -43,8 +43,14 @@ GENERATE_SYSTEM_PROMPT = (
     "You are the code generator inside SOVARA, an air-gapped industrial AI workbench. "
     "Write ONE self-contained Python 3.11 file for the user's task. Rules:\n"
     "- Use only the Python standard library; no network access; no file writes except under /tmp; no input().\n"
-    "- Include pytest-style test functions named test_* with plain assert statements. "
-    "Compute every expected value in the tests by hand from the same formula the code uses.\n"
+    "- Every physical input (pressures, dimensions, allowances, stresses) must be a function parameter; "
+    "never hard-code input values inside the function.\n"
+    "- Validate inputs and raise ValueError for impossible values (e.g. negative dimensions).\n"
+    "- Include pytest-style test functions named test_* with plain assert statements covering at least "
+    "three cases, including one boundary case and one invalid input (pytest.raises(ValueError)). "
+    "In tests, write every expected value as an arithmetic expression built from the test inputs "
+    "(e.g. expected = 10.0 - 0.5 * 4 + 0.2), never as a number you computed yourself, and compare "
+    "floating-point results with pytest.approx(expected).\n"
     "- NEVER call the test functions yourself (no calls at module level, no __main__ block): pytest runs them.\n"
     "- If REFERENCE MATERIAL is provided and contains the relevant formula or limit, use it exactly and name "
     "its source in a comment.\n"
@@ -207,9 +213,11 @@ def _repair_message(run: dict) -> str:
     return (
         f"Your code was run with pytest in the isolated sandbox. {problem}\n\n"
         f"Sandbox output (end):\n{output}\n\n"
-        "Fix the code and/or the tests so they are correct and consistent. Keep all the rules: "
-        "never call test functions yourself, compute expected values from the same formula, "
-        "mark assumptions with '# ASSUMPTION:'. Reply with the complete corrected file in one ```python block."
+        "Fix the code and/or the tests so they are correct and consistent. The most common cause is a "
+        "wrong pre-computed expected value or exact == on floats: rewrite each expected value as an "
+        "arithmetic expression from the test inputs and compare with pytest.approx. Keep all the rules: "
+        "never call test functions yourself, mark assumptions with '# ASSUMPTION:'. "
+        "Reply with the complete corrected file in one ```python block."
     )
 
 
