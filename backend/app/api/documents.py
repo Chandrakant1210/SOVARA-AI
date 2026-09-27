@@ -1,4 +1,5 @@
 ﻿import os
+import json
 import base64
 import shutil
 import uuid
@@ -7,7 +8,7 @@ import threading
 import time
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Path
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from app.services.ocr_service import (
@@ -15,14 +16,20 @@ from app.services.ocr_service import (
     extract_text_with_fallback,
     analyze_page,
 )
-from app.services.scan_extraction_service import extract_inspection_report, REVIEW_CONFIDENCE
-from app.services.audit_service import record_standalone
+from app.services.scan_extraction_service import (
+    REVIEW_CONFIDENCE,
+    build_findings_text,
+    correction_targets,
+    extract_inspection_report,
+)
+from app.services.audit_service import record, record_standalone
 from app.services.embedding_service import get_embedding
 from app.services.qdrant_service import ensure_collection, upsert_chunks
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.models.user import User, UserRole
 from app.models.document import Document
+from app.models.audit_log import AuditLog
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +41,9 @@ UPLOAD_ROOT = os.path.realpath(UPLOAD_DIR)
 
 # Roles allowed to see every document; everyone else sees only their own.
 PRIVILEGED_ROLES = {UserRole.ADMIN, UserRole.MANAGER}
+
+# Roles allowed to correct values extracted from a scan.
+CORRECT_ROLES = {UserRole.ADMIN, UserRole.MANAGER, UserRole.ENGINEER}
 
 # Single source of truth: same threshold as the extraction service.
 LOW_CONFIDENCE_THRESHOLD = REVIEW_CONFIDENCE
@@ -295,6 +305,64 @@ def analyze_document_page(
 MAX_EXTRACTION_PAGES = 10
 
 
+class CorrectionRequest(BaseModel):
+    target: str = Field(..., max_length=100)  # "field:<key>" or "reading:<CML>:<nominal|previous|current>"
+    value: str = Field(..., min_length=1, max_length=200)
+    reason: str = Field("", max_length=300)
+
+
+def _load_corrections(db: Session, doc_id: str) -> dict:
+    """Latest human correction per value for this document, from the audit log."""
+    rows = (
+        db.query(AuditLog)
+        .filter(AuditLog.action == "scan.correction", AuditLog.details.like(f'%"document_id": "{doc_id}"%'))
+        .order_by(AuditLog.created_at.asc())
+        .all()
+    )
+    ids = {r.user_id for r in rows if r.user_id}
+    emails = {str(u.id): u.email for u in db.query(User).filter(User.id.in_(ids)).all()} if ids else {}
+    corrections = {}
+    for r in rows:
+        try:
+            d = json.loads(r.details or "{}")
+        except ValueError:
+            continue
+        if d.get("target") and d.get("value") is not None:
+            corrections[d["target"]] = {
+                "value": d["value"], "reason": d.get("reason"),
+                "by": emails.get(str(r.user_id), "unknown"),
+                "at": r.created_at.isoformat() if r.created_at else None,
+            }
+    return corrections
+
+
+def _run_extraction(file_path: str, corrections: dict) -> tuple[dict, dict, list]:
+    first = analyze_page(file_path, 0)
+    page_total = min(first["page_count"], MAX_EXTRACTION_PAGES)
+    pages = [first] + [analyze_page(file_path, i) for i in range(1, page_total)]
+    lines = [{"page": p["page_index"] + 1, **line} for p in pages for line in p["lines"]]
+    return extract_inspection_report(lines, corrections), first, pages
+
+
+def _current_value(result: dict, target: str):
+    parts = target.split(":")
+    if parts[0] == "field":
+        return next((f["value"] for f in result["fields"] + result["signoff"] if f["key"] == parts[1]), None)
+    cml, col = parts[1], parts[2]
+    return next((r[col] for r in result["readings"] if r["cml"] == cml), None)
+
+
+def _with_meta(result: dict, doc_id: str, filename: str, first: dict, pages: list, user: User) -> dict:
+    result.update({
+        "document_id": doc_id,
+        "filename": filename,
+        "page_count": first["page_count"],
+        "pages_analyzed": len(pages),
+        "can_correct": user.role in CORRECT_ROLES,
+    })
+    return result
+
+
 @router.get("/documents/{document_id}/extraction")
 def extract_document_fields(
     document_id: uuid.UUID,
@@ -303,26 +371,22 @@ def extract_document_fields(
 ):
     """
     Runs OCR on every page (up to MAX_EXTRACTION_PAGES) and returns
-    structured fields, thickness readings and validation checks. Every
-    value points to its source OCR line (page is 1-based).
+    structured fields, thickness readings and validation checks, with
+    human corrections applied. Every value points to its source OCR line.
     """
     document = _get_accessible_document(document_id, current_user, db)
     file_path = _resolve_upload_path(document.file_path)
     doc_id, filename = str(document.id), document.filename
     user_id = current_user.id
+    corrections = _load_corrections(db, doc_id)
     # Release the DB connection before slow OCR (see analyze_document_page).
     db.close()
 
     try:
-        first = analyze_page(file_path, 0)
-        page_total = min(first["page_count"], MAX_EXTRACTION_PAGES)
-        pages = [first] + [analyze_page(file_path, i) for i in range(1, page_total)]
+        result, first, pages = _run_extraction(file_path, corrections)
     except Exception as e:
         logger.exception("Extraction OCR failed for document %s", doc_id)
         raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
-
-    lines = [{"page": p["page_index"] + 1, **line} for p in pages for line in p["lines"]]
-    result = extract_inspection_report(lines)
 
     summary = result["summary"]
     flagged = summary["needs_review"] + summary["failed_checks"]
@@ -338,10 +402,89 @@ def extract_document_fields(
             "result": f"{flagged} {'item' if flagged == 1 else 'items'} flagged" if flagged else "no issues",
             "document_id": doc_id, "filename": filename,
         })
-    result.update({
-        "document_id": doc_id,
-        "filename": filename,
-        "page_count": first["page_count"],
-        "pages_analyzed": len(pages),
+
+    return _with_meta(result, doc_id, filename, first, pages, current_user)
+
+
+@router.post("/documents/{document_id}/corrections")
+def correct_value(
+    document_id: uuid.UUID,
+    request: CorrectionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Records a human correction of one extracted value. Stored as an audit
+    event (who, what, from, to, why); nothing is overwritten. Returns the
+    extraction re-validated with all corrections applied.
+    """
+    if current_user.role not in CORRECT_ROLES:
+        raise HTTPException(status_code=403, detail="Your role can't correct extracted values")
+    document = _get_accessible_document(document_id, current_user, db)
+    file_path = _resolve_upload_path(document.file_path)
+    doc_id, filename = str(document.id), document.filename
+
+    try:
+        result, _, _ = _run_extraction(file_path, _load_corrections(db, doc_id))
+    except Exception as e:
+        logger.exception("Extraction failed before correction for document %s", doc_id)
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+    target = request.target.strip()
+    if target not in correction_targets(result):
+        raise HTTPException(status_code=422, detail=f"'{target}' is not a correctable value on this document")
+    value = request.value.strip()
+    if target.startswith("reading:") and not target.endswith(":location"):
+        try:
+            float(value)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Thickness readings must be numbers, e.g. 13.1")
+
+    original = _current_value(result, target)
+    try:
+        record(db, current_user.id, "scan.correction", {
+            "summary": f"Corrected {target.split(':', 1)[1].replace(':', ' ')} on {filename}",
+            "tool": "Scan Analysis", "result": "corrected",
+            "document_id": doc_id, "target": target,
+            "original": original, "value": value, "reason": request.reason.strip() or None,
+        })
+    except Exception:
+        db.rollback()
+        logger.exception("Audit write failed; correction not recorded")
+        raise HTTPException(status_code=503, detail="Audit log unavailable; the correction was not recorded")
+
+    corrections = _load_corrections(db, doc_id)
+    db.close()
+    result, first, pages = _run_extraction(file_path, corrections)
+    return _with_meta(result, doc_id, filename, first, pages, current_user)
+
+
+@router.post("/documents/{document_id}/findings")
+def document_findings(
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Findings text for the agent, built on the server from the validated
+    extraction (with corrections). Marks corrected and unconfirmed values.
+    """
+    document = _get_accessible_document(document_id, current_user, db)
+    file_path = _resolve_upload_path(document.file_path)
+    doc_id, filename = str(document.id), document.filename
+    user_id = current_user.id
+    corrections = _load_corrections(db, doc_id)
+    db.close()
+
+    try:
+        result, _, _ = _run_extraction(file_path, corrections)
+    except Exception as e:
+        logger.exception("Findings extraction failed for document %s", doc_id)
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+    summary = result["summary"]
+    record_standalone(user_id, "scan.findings", {
+        "summary": f"Prepared findings from {filename}", "tool": "Scan Analysis",
+        "result": f"{summary['needs_review']} items need review", "document_id": doc_id,
     })
-    return result
+    return {"document_id": doc_id, "filename": filename, "text": build_findings_text(result, filename), "summary": summary}

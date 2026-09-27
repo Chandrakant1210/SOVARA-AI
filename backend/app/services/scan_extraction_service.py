@@ -434,10 +434,125 @@ def _run_checks(fields: list[dict], readings: list[dict], years: dict, lines: li
 
 
 # --------------------------------------------------------------------------
+# Human corrections
+# --------------------------------------------------------------------------
+
+_READING_COLUMNS = ("nominal", "previous", "current")
+_READING_TEXT_COLUMNS = ("location",)
+_SIGNOFF_KINDS = {"inspector_name": "text", "inspector_designation": "text", "inspector_date": "date",
+                  "reviewer_name": "text", "reviewer_designation": "text", "reviewer_date": "date"}
+
+
+def correction_targets(result: dict) -> set[str]:
+    """Every value a person may correct: report fields, sign-off text fields, readings."""
+    targets = {f"field:{f['key']}" for f in result["fields"]}
+    targets |= {f"field:{f['key']}" for f in result["signoff"] if f["key"] in _SIGNOFF_KINDS}
+    targets |= {f"reading:{r['cml']}:{c}" for r in result["readings"] for c in _READING_COLUMNS + _READING_TEXT_COLUMNS}
+    return targets
+
+
+def _apply_corrections(fields: list[dict], signoff: list[dict], readings: list[dict], corrections: dict) -> int:
+    """
+    Applies human corrections, re-validating each corrected value.
+    corrections: {target: {"value", "original", "by", "at", "reason"}}; latest per target.
+    The OCR source link is kept, so the scan highlight still shows where the value came from.
+    """
+    kinds = {spec["key"]: spec["kind"] for spec in FIELD_SPECS} | _SIGNOFF_KINDS
+    applied = 0
+    for item in fields + signoff:
+        c = corrections.get(f"field:{item['key']}")
+        if not c or item["key"] not in kinds:
+            continue
+        parsed, problems = _validate_value(kinds[item["key"]], c["value"])
+        item["corrected"] = {"original": item["value"], "by": c.get("by"), "at": c.get("at"), "reason": c.get("reason")}
+        item.update(value=c["value"], parsed=parsed, reasons=problems, status="review" if problems else "ok")
+        applied += 1
+
+    for r in readings:
+        for col in _READING_TEXT_COLUMNS:
+            c = corrections.get(f"reading:{r['cml']}:{col}")
+            if not c:
+                continue
+            r.setdefault("corrected", {})[col] = {"original": r[col], "by": c.get("by"), "at": c.get("at"), "reason": c.get("reason")}
+            r[col] = c["value"].strip()
+            r["reasons"] = [x for x in r["reasons"] if not x.lower().startswith(col)]
+            applied += 1
+        for col in _READING_COLUMNS:
+            c = corrections.get(f"reading:{r['cml']}:{col}")
+            if not c:
+                continue
+            value = _parse_number(c["value"])
+            r.setdefault("corrected", {})[col] = {"original": r[col], "by": c.get("by"), "at": c.get("at"), "reason": c.get("reason")}
+            r[col] = value
+            # Drop OCR problems for this column; a person has confirmed it.
+            r["reasons"] = [x for x in r["reasons"] if not x.lower().startswith(col)]
+            if value is None:
+                r["reasons"].append(f"Corrected {col} value '{c['value']}' is not a number")
+            applied += 1
+        r["status"] = "review" if r["reasons"] else "ok"
+    return applied
+
+
+def build_findings_text(result: dict, filename: str) -> str:
+    """
+    Plain-text findings for the agent. States clearly which values were read
+    by OCR, which were corrected by a named person, and which still need review,
+    so the agent can't present unconfirmed values as facts.
+    """
+    def mark(item: dict) -> str:
+        if item.get("corrected"):
+            c = item["corrected"]
+            return f" [corrected by {c.get('by') or 'reviewer'}; OCR read \"{c.get('original')}\"]"
+        if item["status"] == "review":
+            return f" [NEEDS REVIEW: {'; '.join(item['reasons'])}]"
+        return ""
+
+    lines = [
+        f'INSPECTION FINDINGS extracted by SOVARA from the scanned report "{filename}".',
+        "Values were read by OCR and checked by validation rules. Values marked [corrected] "
+        "were confirmed by a named person. Values marked [NEEDS REVIEW] are not confirmed and "
+        "must not be treated as facts.",
+        "",
+        "Report and equipment details:",
+    ]
+    for f in result["fields"]:
+        if f["status"] == "not_found":
+            lines.append(f"- {f['label']}: not found on the scan")
+        else:
+            lines.append(f"- {f['label']}: {f['value']}{mark(f)}")
+
+    if result["readings"]:
+        years = result.get("reading_years") or {}
+        lines += ["", f"Thickness readings in mm (nominal / {years.get('previous') or 'previous'} / "
+                      f"{years.get('current') or 'current'}), corrosion rate in mm/year:"]
+        for r in result["readings"]:
+            rate = f"{r['corrosion_rate']:.2f}" if r.get("corrosion_rate") is not None else "n/a"
+            flag = f" [FLAGGED: {'; '.join(r['reasons'])}]" if r["status"] == "review" else ""
+            fixed = f" [corrected: {', '.join(r['corrected'])}]" if r.get("corrected") else ""
+            lines.append(f"- {r['cml']} {r.get('location') or ''}: {r['nominal']} / {r['previous']} / {r['current']}, "
+                         f"rate {rate}{flag}{fixed}")
+
+    lines += ["", "Validation checks (recomputed by SOVARA, independent of OCR confidence):"]
+    for c in result["checks"]:
+        lines.append(f"- {c['status'].upper()} {c['title']}: {c['detail']}")
+
+    lines += ["", "Sign-off recorded on the scan:"]
+    for f in result["signoff"]:
+        value = f["value"] if f["value"] else f["status"].replace("_", " ")
+        lines.append(f"- {f['label']}: {value}{mark(f) if f['value'] else ''}")
+
+    s = result["summary"]
+    lines += ["", f"Items still needing human review: {s['needs_review']}. "
+                  f"Failed checks: {s['failed_checks']}. Warnings: {s['warnings']}. "
+                  f"Human corrections applied: {s.get('corrected', 0)}."]
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------
 
-def extract_inspection_report(lines: list[dict]) -> dict:
+def extract_inspection_report(lines: list[dict], corrections: dict | None = None) -> dict:
     """
     lines: OCR lines from all pages, each {"page", "text", "confidence", "bbox"}.
     Returns fields, sign-off, readings and validation checks, every value
@@ -446,6 +561,7 @@ def extract_inspection_report(lines: list[dict]) -> dict:
     fields = _extract_fields(lines)
     signoff = _extract_signoff(lines)
     readings, years = _extract_readings(lines)
+    corrected = _apply_corrections(fields, signoff, readings, corrections or {})
     checks = _run_checks(fields, readings, years, lines)
 
     all_items = fields + signoff + readings
@@ -462,5 +578,6 @@ def extract_inspection_report(lines: list[dict]) -> dict:
             "not_found": sum(1 for i in all_items if i["status"] == "not_found"),
             "failed_checks": sum(1 for c in checks if c["status"] == "fail"),
             "warnings": sum(1 for c in checks if c["status"] == "warn"),
+            "corrected": corrected,
         },
     }

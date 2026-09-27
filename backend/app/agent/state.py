@@ -56,6 +56,10 @@ class AgentState(TypedDict):
     # Set by the Generate node: file path of the generated DOCX approval note.
     docx_path: Optional[str]
 
+    # Set by the API before the run: run id, requesting user, model and source
+    # document. Written into the approval note by SOVARA, never by the model.
+    run_meta: Optional[dict]
+
     # Simple trace of which nodes have run, useful for debugging and
     # later for showing live agent progress in the UI.
     steps_completed: list

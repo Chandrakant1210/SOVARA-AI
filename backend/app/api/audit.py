@@ -38,6 +38,7 @@ HEADLINE_ACTIONS = (
     "sandbox.generate.result",
     "document.upload",
     "scan.extract",
+    "scan.correction",
     "review.decision",
     "review.save_modified",
     "registry.register",

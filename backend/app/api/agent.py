@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.agent.graph import build_agent_graph
+from app.api.documents import _get_accessible_document
 from app.config.model_registry import get_model_for_capability
 from app.core.database import get_db
 from app.core.deps import get_current_user
@@ -32,6 +33,8 @@ MAX_DOCUMENT_CHARS = 200_000
 class AgentRunRequest(BaseModel):
     user_input: str = Field(..., max_length=MAX_INPUT_CHARS)
     document_text: Optional[str] = Field(None, max_length=MAX_DOCUMENT_CHARS)
+    # Scan the findings came from; links scan -> run -> note -> sign-off in the audit trail.
+    source_document_id: Optional[uuid.UUID] = None
 
 
 class AgentRunResponse(BaseModel):
@@ -62,7 +65,8 @@ def _step_details(node: str, node_state: dict, model: str) -> dict:
     return {"tool": model, "result": "ok"}
 
 
-def _run_agent_audited(run_id: str, user_id, user_input: str, document_text: Optional[str]) -> Iterator[tuple[str, dict]]:
+def _run_agent_audited(run_id: str, user_id, user_input: str, document_text: Optional[str],
+                       run_meta: Optional[dict] = None) -> Iterator[tuple[str, dict]]:
     """
     Runs the graph step by step, writing one audit event per completed node
     and a final result event (success / error / cancelled). Yields
@@ -71,7 +75,10 @@ def _run_agent_audited(run_id: str, user_id, user_input: str, document_text: Opt
     model = _reasoning_model_name()
     started = last = time.monotonic()
     outcome, error, docx_name, sources = "error", None, None, []
-    initial_state = {"user_input": user_input, "document_text": document_text, "steps_completed": []}
+    initial_state = {
+        "user_input": user_input, "document_text": document_text, "steps_completed": [],
+        "run_meta": {**(run_meta or {}), "run_id": run_id, "model": model},
+    }
 
     try:
         for step_output in _agent.stream(initial_state):
@@ -92,7 +99,12 @@ def _run_agent_audited(run_id: str, user_id, user_input: str, document_text: Opt
                 yield node, node_state
         outcome = "success"
     except GeneratorExit:
-        outcome = "cancelled"  # client disconnected mid-run
+        # Client disconnected. If the note was already generated the work is
+        # complete; only an unfinished run counts as cancelled.
+        if docx_name:
+            outcome, error = "success", "client disconnected after the note was generated"
+        else:
+            outcome = "cancelled"
         raise
     except Exception as e:
         error = str(e)
@@ -107,13 +119,18 @@ def _run_agent_audited(run_id: str, user_id, user_input: str, document_text: Opt
         })
 
 
-def _start_run(db: Session, user: User, request: AgentRunRequest) -> str:
-    """Validates input and writes the fail-closed start event. Returns the run id."""
+def _start_run(db: Session, user: User, request: AgentRunRequest) -> tuple[str, dict]:
+    """Validates input and writes the fail-closed start event. Returns (run id, run metadata)."""
     if not request.user_input.strip():
         raise HTTPException(status_code=400, detail="user_input cannot be empty")
+    source = None
+    if request.source_document_id:
+        source = _get_accessible_document(request.source_document_id, user, db)  # 404 if not allowed
     run_id = str(uuid.uuid4())
     try:
         record(db, user.id, "agent.run.start", {
+            "source_document_id": str(source.id) if source else None,
+            "source_filename": source.filename if source else None,
             "run_id": run_id, "summary": "Started agent run", "tool": _reasoning_model_name(),
             "input_sha256": sha256(request.user_input), "input_chars": len(request.user_input),
             "has_document": bool(request.document_text),
@@ -122,7 +139,9 @@ def _start_run(db: Session, user: User, request: AgentRunRequest) -> str:
         db.rollback()
         logger.exception("Audit write failed; refusing agent run")
         raise HTTPException(status_code=503, detail="Audit log unavailable; the agent was not run")
-    return run_id
+    # Written into the note by SOVARA itself (never left to the model).
+    run_meta = {"requested_by": user.email, "source_filename": source.filename if source else None}
+    return run_id, run_meta
 
 
 @router.post("/agent/run", response_model=AgentRunResponse)
@@ -136,13 +155,13 @@ def run_agent(
     Kept for scripted/programmatic use (e.g. testing) where step-by-step
     progress isn't needed. The frontend should use /agent/run/stream instead.
     """
-    run_id = _start_run(db, current_user, request)
+    run_id, run_meta = _start_run(db, current_user, request)
     user_id = current_user.id
     db.close()  # the run can take minutes; don't hold a DB connection
 
     final_state: dict = {}
     try:
-        for _, node_state in _run_agent_audited(run_id, user_id, request.user_input, request.document_text):
+        for _, node_state in _run_agent_audited(run_id, user_id, request.user_input, request.document_text, run_meta):
             final_state.update(node_state)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Agent execution failed: {str(e)}")
@@ -155,15 +174,16 @@ def run_agent(
     )
 
 
-def _stream_agent_events(run_id: str, user_id, user_input: str, document_text: Optional[str]):
+def _stream_agent_events(run_id: str, user_id, user_input: str, document_text: Optional[str], run_meta: dict):
     """
     Streams a Server-Sent Event after each node completes. Every event
     carries the run_id so the UI can link the run to its audit trace.
     Audit writes use their own sessions: the request's session is already
     closed by the time this generator runs.
     """
+    model = _reasoning_model_name()
     try:
-        for node_name, node_state in _run_agent_audited(run_id, user_id, user_input, document_text):
+        for node_name, node_state in _run_agent_audited(run_id, user_id, user_input, document_text, run_meta):
             event = {
                 "type": "step_complete",
                 "run_id": run_id,
@@ -177,6 +197,7 @@ def _stream_agent_events(run_id: str, user_id, user_input: str, document_text: O
                 final_event = {
                     "type": "done",
                     "run_id": run_id,
+                    "model": model,
                     "final_output": node_state.get("final_output"),
                     "docx_path": node_state.get("docx_path"),
                     "citations": node_state.get("citations", []),
@@ -199,11 +220,11 @@ def run_agent_stream(
     completes, so the frontend can show real live progress instead of
     a fake timed animation.
     """
-    run_id = _start_run(db, current_user, request)
+    run_id, run_meta = _start_run(db, current_user, request)
     user_id = current_user.id
     db.close()
 
     return StreamingResponse(
-        _stream_agent_events(run_id, user_id, request.user_input, request.document_text),
+        _stream_agent_events(run_id, user_id, request.user_input, request.document_text, run_meta),
         media_type="text/event-stream",
     )
