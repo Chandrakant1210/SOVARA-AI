@@ -40,6 +40,15 @@ type RunResult = {
   test_summary: string | null;
 };
 
+type GenerateAttempt = {
+  attempt: number;
+  runner: string;
+  test_summary: string | null;
+  exit_code: number;
+  timed_out: boolean;
+  passed: boolean;
+};
+
 type GenerateResult = {
   code: string;
   filename: string;
@@ -48,6 +57,11 @@ type GenerateResult = {
   capability_served: string;
   reason: string;
   duration_ms: number;
+  attempts: GenerateAttempt[];
+  verified: boolean;
+  run: RunResult;
+  sources: { source: string; score: number }[];
+  reference_note: string | null;
 };
 
 // ---------- helpers ----------
@@ -167,12 +181,12 @@ export default function CodeSandboxPanel() {
       });
       if (!res.ok) throw new Error(await readError(res));
       const data: GenerateResult = await res.json();
+      // The server already ran every attempt with pytest in the sandbox.
       setRoute(data);
       setCode(data.code);
       setFilename(data.filename);
-      setGenerating(false);
-      // Generated code is verified immediately, inside the isolated container.
-      await runCode(data.code);
+      setResult(data.run);
+      setShowLog(!data.verified);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Generation failed");
     } finally {
@@ -236,8 +250,23 @@ export default function CodeSandboxPanel() {
             {generating ? "Generating..." : "Generate"}
           </button>
         </div>
-        {generating && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>The local model is writing code. This can take 30&ndash;120 seconds on this hardware.</p>}
-        {route && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{route.reason} &middot; generated in {(route.duration_ms / 1000).toFixed(1)} s</p>}
+        {generating && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>The local model is writing code and testing it in the sandbox; failing tests are sent back for a fix (up to 3 attempts).</p>}
+        {route && <p className="mt-2 text-xs" style={{ color: "var(--text-muted)" }}>{route.reason} &middot; {route.attempts.length} {route.attempts.length === 1 ? "attempt" : "attempts"} in {(route.duration_ms / 1000).toFixed(1)} s</p>}
+        {route && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            {route.attempts.map((a) => (
+              <span key={a.attempt} className="text-[11px] font-mono px-2 py-0.5 rounded" style={{ background: a.passed ? "var(--accent-soft-bg)" : "var(--error-bg)", color: a.passed ? "var(--accent-2)" : "var(--error-text)" }}>
+                attempt {a.attempt}: {a.timed_out ? "timed out" : a.test_summary ?? `exit ${a.exit_code}`}
+              </span>
+            ))}
+            {route.sources.map((src) => (
+              <span key={src.source} className="text-[11px] font-mono px-2 py-0.5 rounded" style={{ background: "var(--bg)", color: "var(--text-secondary)" }} title="Reference material given to the model (access-filtered)">
+                ref: {src.source} &middot; {src.score.toFixed(2)}
+              </span>
+            ))}
+            {route.reference_note && <span className="text-[11px]" style={{ color: "var(--accent-3)" }}>{route.reference_note}</span>}
+          </div>
+        )}
       </div>
 
       {info && !info.can_run && (
@@ -299,6 +328,11 @@ export default function CodeSandboxPanel() {
                   <verdict.Icon className="h-3.5 w-3.5" /> {verdict.text}
                   <span className="ml-auto font-mono font-normal">{(result.duration_ms / 1000).toFixed(1)} s</span>
                 </div>
+                {result.runner === "pytest" && result.exit_code === 0 && !result.timed_out && (
+                  <p className="mt-2 text-[11px] leading-relaxed" style={{ color: "var(--text-muted)" }}>
+                    Verified means the tests in this file pass. When the model wrote the tests, a pass doesn&apos;t prove the engineering is right: check formulas and any <code># ASSUMPTION</code> lines against the SOP before use.
+                  </p>
+                )}
                 {result.output_truncated && <p className="mt-2 flex items-center gap-1 text-xs" style={{ color: "var(--accent-3)" }}><AlertTriangle className="h-3.5 w-3.5" /> Output was truncated.</p>}
                 <button onClick={() => setShowLog((v) => !v)} className="mt-2 text-xs underline" style={{ color: "var(--text-secondary)" }}>{showLog ? "Hide full output" : "Show full output"}</button>
                 {showLog && (
