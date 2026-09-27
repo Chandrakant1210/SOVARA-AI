@@ -35,3 +35,10 @@ models:
     description: "General reasoning, document analysis, planning, drafting — currently the only reasoning model confirmed available on this hardware"
     context_length: 32768
     available: true  # confirmed pulled via `ollama list`
+
+  qwen2.5-coder-7b:
+    capability: coding
+    provider: ollama
+    model_name: qwen2.5-coder:7b
+    description: Code generation for the sandbox (fits 8 GB VRAM)
+    available: true
