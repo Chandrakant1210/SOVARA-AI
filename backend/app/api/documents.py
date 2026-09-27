@@ -3,6 +3,8 @@ import base64
 import shutil
 import uuid
 import logging
+import threading
+import time
 from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Path
 from pydantic import BaseModel
@@ -14,6 +16,7 @@ from app.services.ocr_service import (
     analyze_page,
 )
 from app.services.scan_extraction_service import extract_inspection_report, REVIEW_CONFIDENCE
+from app.services.audit_service import record_standalone
 from app.services.embedding_service import get_embedding
 from app.services.qdrant_service import ensure_collection, upsert_chunks
 from app.core.database import get_db
@@ -36,6 +39,12 @@ PRIVILEGED_ROLES = {UserRole.ADMIN, UserRole.MANAGER}
 LOW_CONFIDENCE_THRESHOLD = REVIEW_CONFIDENCE
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".bmp", ".pdf"}
+
+# Viewing the same scan again within this window isn't logged twice
+# (page reloads, React dev double-requests).
+SCAN_AUDIT_DEDUPE_SECONDS = 600
+_scan_audit_seen: dict[tuple[str, str], float] = {}
+_scan_audit_lock = threading.Lock()
 
 _splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
 
@@ -165,6 +174,10 @@ def upload_document(
         # Clean up the orphaned file before returning the error —
         # otherwise every failed OCR/vision request leaves a dead file on disk.
         _remove_file(file_path)
+        record_standalone(current_user.id, "document.upload", {
+            "summary": f"Uploaded {file.filename}", "tool": "Document Vault", "result": "failed",
+            "error": str(e),
+        })
         raise HTTPException(status_code=500, detail=f"Document processing failed: {str(e)}")
 
     # PostgreSQL rejects NUL bytes in text columns; bad scans can produce them.
@@ -198,6 +211,12 @@ def upload_document(
     except Exception:
         logger.exception("Indexing failed for document %s", document.id)
         indexed_chunks = 0
+
+    record_standalone(current_user.id, "document.upload", {
+        "summary": f"Uploaded {file.filename}", "tool": "Document Vault",
+        "result": f"indexed · {indexed_chunks} chunks" if indexed_chunks else "stored, not indexed",
+        "document_id": str(document.id),
+    })
 
     return UploadResponse(
         document_id=str(document.id),
@@ -290,6 +309,7 @@ def extract_document_fields(
     document = _get_accessible_document(document_id, current_user, db)
     file_path = _resolve_upload_path(document.file_path)
     doc_id, filename = str(document.id), document.filename
+    user_id = current_user.id
     # Release the DB connection before slow OCR (see analyze_document_page).
     db.close()
 
@@ -303,6 +323,21 @@ def extract_document_fields(
 
     lines = [{"page": p["page_index"] + 1, **line} for p in pages for line in p["lines"]]
     result = extract_inspection_report(lines)
+
+    summary = result["summary"]
+    flagged = summary["needs_review"] + summary["failed_checks"]
+    key = (str(user_id), doc_id)
+    with _scan_audit_lock:
+        now = time.monotonic()
+        recent = now - _scan_audit_seen.get(key, -SCAN_AUDIT_DEDUPE_SECONDS) < SCAN_AUDIT_DEDUPE_SECONDS
+        _scan_audit_seen[key] = now
+    if not recent:
+        record_standalone(user_id, "scan.extract", {
+            "summary": f"Analysed {filename} ({len(pages)} {'page' if len(pages) == 1 else 'pages'})",
+            "tool": "PaddleOCR + rules",
+            "result": f"{flagged} {'item' if flagged == 1 else 'items'} flagged" if flagged else "no issues",
+            "document_id": doc_id, "filename": filename,
+        })
     result.update({
         "document_id": doc_id,
         "filename": filename,

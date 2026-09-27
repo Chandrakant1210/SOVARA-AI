@@ -1,10 +1,14 @@
-﻿import ollama
+﻿import logging
+
+import ollama
 from langgraph.graph import StateGraph, END
 from app.agent.state import AgentState
 from app.config.model_registry import get_model_for_capability
 from app.services.docx_service import generate_approval_note
 from app.services.embedding_service import get_embedding
 from app.services.qdrant_service import search
+
+logger = logging.getLogger(__name__)
 
 
 def _call_reasoning_model(prompt: str) -> str:
@@ -64,7 +68,11 @@ def retrieve_node(state: AgentState) -> dict:
     user question as the query — more predictable than embedding the
     model's restated understanding, which can drift (e.g. focusing on
     "no document was provided" rather than the actual question asked).
+
+    A failure is recorded in `retrieval_error` instead of being hidden,
+    so the trace never presents "retrieval broke" as "nothing relevant found".
     """
+    retrieval_error = None
     try:
         query_embedding = get_embedding(state["user_input"])
         raw_results = search(query_embedding, top_k=3)
@@ -77,13 +85,15 @@ def retrieve_node(state: AgentState) -> dict:
             for r in raw_results
         ]
     except Exception as err:
-        print(f"RETRIEVE_NODE ERROR: {type(err).__name__}: {err}")
+        logger.exception("Retrieval failed")
+        retrieval_error = f"{type(err).__name__}: {err}"
         context = []
         citations = []
 
     return {
         "retrieved_context": context,
         "citations": citations,
+        "retrieval_error": retrieval_error,
         "steps_completed": state.get("steps_completed", []) + ["retrieve"],
     }
 
@@ -157,6 +167,8 @@ def generate_node(state: AgentState) -> dict:
         "citations": state.get("citations", []),
         "steps_completed": state.get("steps_completed", []) + ["generate"],
     }
+
+
 def build_agent_graph():
     """Builds and compiles the SOVARA agent graph."""
     graph = StateGraph(AgentState)

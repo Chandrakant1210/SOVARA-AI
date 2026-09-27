@@ -13,16 +13,15 @@ import { useAuth } from "@/lib/AuthContext";
 import ScanAnalysisPanel from "@/components/ScanAnalysisPanel";
 import CodeSandboxPanel from "@/components/CodeSandboxPanel";
 import ModelRegistryPanel from "@/components/ModelRegistryPanel";
+import ActivityLogPanel from "@/components/ActivityLogPanel";
 
 export type AgentResult = {
   response: string;
   docxPath: string;
   citations: { source: string; score: number }[];
+  runId: string | null;
 };
 
-const COMING_SOON: Record<string, string> = {
-  Audit: "Activity Log UI -- coming soon.",
-};
 
 export default function Console() {
   const [tab, setTab] = useState<NavKey>("Chat");
@@ -58,13 +57,7 @@ export default function Console() {
           {tab === "Scan" && <ScanAnalysisPanel />}
           {tab === "Sandbox" && <CodeSandboxPanel />}
           {tab === "Models" && <ModelRegistryPanel />}
-          {tab === "Audit" && (
-            <div className="flex items-center justify-center h-full px-8">
-              <p className="text-sm text-[var(--text-muted)] max-w-sm text-center leading-relaxed">
-                {COMING_SOON[tab]}
-              </p>
-            </div>
-          )}
+          {tab === "Audit" && <ActivityLogPanel />}
         </main>
       </div>
     </div>
