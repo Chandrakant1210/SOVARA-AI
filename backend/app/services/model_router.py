@@ -7,6 +7,8 @@ with an honest reason, including which candidates were skipped and why.
 Only the local Ollama server is ever contacted.
 """
 
+import logging
+import os
 import threading
 import time
 
@@ -22,6 +24,15 @@ CAPABILITY_LABELS = {
     "classification": "Intent classification",
 }
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+# Local inference settings (overridable via environment variables).
+# 8192 tokens fits qwen3:8b plus its cache in 8 GB VRAM; Ollama's default
+# (4096) silently drops the start of longer prompts.
+LLM_NUM_CTX = int(os.getenv("SOVARA_NUM_CTX", "8192"))
+# Keep the model in VRAM between requests so a demo never waits for a cold load.
+LLM_KEEP_ALIVE = os.getenv("SOVARA_KEEP_ALIVE", "30m")
 
 # If no model for a capability is usable, try these capabilities next, in order.
 CAPABILITY_FALLBACKS = {
@@ -170,21 +181,49 @@ def resolve_model(capability: str) -> dict:
     raise ModelUnavailableError(f"No usable model for '{capability}'{detail}")
 
 
-def chat(model_name: str, messages: list[dict], timeout: int = 180, temperature: float = 0.2) -> str:
-    """Single non-streaming chat call to the local Ollama server."""
+def chat_with_stats(
+    model_name: str,
+    messages: list[dict],
+    *,
+    think: bool = False,
+    timeout: int = 300,
+    temperature: float = 0.2,
+) -> tuple[str, dict]:
+    """
+    Single non-streaming chat call to the local Ollama server.
+    Returns (answer, stats). Warns when the prompt filled the whole context
+    window, because Ollama then silently drops the start of the prompt.
+    """
     resp = requests.post(
         f"{settings.ollama_host}/api/chat",
         json={
             "model": model_name,
             "messages": messages,
             "stream": False,
-            "think": False,  # qwen3: skip the thinking trace; we only want the answer
-            "options": {"temperature": temperature},
+            "think": think,  # qwen3: hidden reasoning only where it helps
+            "keep_alive": LLM_KEEP_ALIVE,
+            "options": {"temperature": temperature, "num_ctx": LLM_NUM_CTX},
         },
         timeout=timeout,
     )
     resp.raise_for_status()
-    return resp.json().get("message", {}).get("content", "")
+    data = resp.json()
+    stats = {
+        "prompt_tokens": data.get("prompt_eval_count"),
+        "output_tokens": data.get("eval_count"),
+        "num_ctx": LLM_NUM_CTX,
+        "truncated": (data.get("prompt_eval_count") or 0) >= LLM_NUM_CTX - 8,
+    }
+    if stats["truncated"]:
+        logger.warning("Prompt filled the %s-token context of %s; its start was likely truncated",
+                       LLM_NUM_CTX, model_name)
+    return data.get("message", {}).get("content", ""), stats
+
+
+def chat(model_name: str, messages: list[dict], timeout: int = 180, temperature: float = 0.2) -> str:
+    """Single non-streaming chat call (thinking off). See chat_with_stats()."""
+    answer, _ = chat_with_stats(model_name, messages, think=False, timeout=timeout, temperature=temperature)
+    return answer
 
 
 def generate_response(prompt: str) -> str:

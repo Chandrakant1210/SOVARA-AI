@@ -1,24 +1,25 @@
 ﻿import logging
 
-import ollama
 from langgraph.graph import StateGraph, END
 from app.agent.state import AgentState
 from app.config.model_registry import get_model_for_capability
 from app.services.docx_service import generate_approval_note
 from app.services.embedding_service import get_embedding
 from app.services.qdrant_service import search
+from app.services.model_router import chat_with_stats
 
 logger = logging.getLogger(__name__)
 
 
-def _call_reasoning_model(prompt: str) -> str:
-    """Calls the registered reasoning model via Ollama and returns its text response."""
+def _call_reasoning_model(prompt: str, think: bool = False) -> str:
+    """
+    Calls the registered reasoning model on the local Ollama server.
+    `think` enables qwen3's hidden reasoning: slower, so only the Reason step
+    uses it. A prompt that overflows the context window is logged as a warning.
+    """
     model_name = get_model_for_capability("reasoning")["model_name"]
-    response = ollama.chat(
-        model=model_name,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response["message"]["content"]
+    answer, _stats = chat_with_stats(model_name, [{"role": "user", "content": prompt}], think=think)
+    return answer
 
 
 def understand_node(state: AgentState) -> dict:
@@ -117,7 +118,7 @@ def reason_node(state: AgentState) -> dict:
         f"Document content: {state.get('document_text') or '(none provided)'}\n\n"
         f"Retrieved context: {context_text}"
     )
-    reasoning_output = _call_reasoning_model(prompt)
+    reasoning_output = _call_reasoning_model(prompt, think=True)  # the one step that benefits from deliberation
     return {
         "reasoning_output": reasoning_output,
         "steps_completed": state.get("steps_completed", []) + ["reason"],
