@@ -37,6 +37,7 @@ HEADLINE_ACTIONS = (
     "sandbox.result",
     "sandbox.generate.result",
     "document.upload",
+    "document.delete",
     "scan.extract",
     "scan.correction",
     "review.decision",
