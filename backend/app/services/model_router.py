@@ -13,6 +13,14 @@ import time
 import requests
 
 from app.config.model_registry import list_models
+
+# Human-readable task names for each capability (used by the registry UI).
+CAPABILITY_LABELS = {
+    "reasoning": "Document analysis, drafting",
+    "coding": "Code, calculations",
+    "vision": "Image, scan, drawing",
+    "classification": "Intent classification",
+}
 from app.core.config import settings
 
 # If no model for a capability is usable, try these capabilities next, in order.
@@ -37,8 +45,11 @@ def _normalize(name: str) -> str:
     return name if ":" in name else f"{name}:latest"
 
 
-def installed_ollama_models() -> set[str]:
-    """Model names installed in the local Ollama server (cached briefly)."""
+def installed_ollama_details() -> dict[str, dict]:
+    """
+    Models installed in the local Ollama server, keyed by normalized name,
+    with size, parameter count and quantization. Cached briefly.
+    """
     with _installed_lock:
         now = time.monotonic()
         if _installed_cache["models"] is not None and now - _installed_cache["at"] < _INSTALLED_CACHE_SECONDS:
@@ -46,11 +57,70 @@ def installed_ollama_models() -> set[str]:
         try:
             resp = requests.get(f"{settings.ollama_host}/api/tags", timeout=5)
             resp.raise_for_status()
-            models = {_normalize(m["name"]) for m in resp.json().get("models", [])}
+            models = {}
+            for m in resp.json().get("models", []):
+                details = m.get("details") or {}
+                models[_normalize(m["name"])] = {
+                    "name": m["name"],
+                    "size_bytes": m.get("size"),
+                    "parameter_size": details.get("parameter_size"),
+                    "quantization": details.get("quantization_level"),
+                    "family": details.get("family"),
+                }
         except Exception as e:
             raise ModelUnavailableError(f"Local Ollama server is not reachable: {e}")
         _installed_cache.update(at=now, models=models)
         return models
+
+
+def installed_ollama_models() -> set[str]:
+    """Normalized names of models installed in the local Ollama server."""
+    return set(installed_ollama_details())
+
+
+def loaded_ollama_models() -> dict[str, dict]:
+    """Models currently loaded in memory (live, not cached), with real VRAM use."""
+    resp = requests.get(f"{settings.ollama_host}/api/ps", timeout=5)
+    resp.raise_for_status()
+    return {
+        _normalize(m["name"]): {"size_bytes": m.get("size"), "vram_bytes": m.get("size_vram"), "expires_at": m.get("expires_at")}
+        for m in resp.json().get("models", [])
+    }
+
+
+def ollama_model_capabilities(model_name: str) -> set[str] | None:
+    """
+    What the model can do according to Ollama itself, e.g. {"completion", "vision"}
+    or {"embedding"}. None if this Ollama version doesn't report capabilities.
+    """
+    resp = requests.post(f"{settings.ollama_host}/api/show", json={"model": model_name}, timeout=10)
+    resp.raise_for_status()
+    caps = resp.json().get("capabilities")
+    return set(caps) if isinstance(caps, list) else None
+
+
+def registrable_problem(model_name: str, capability: str) -> str | None:
+    """
+    Why this model can't serve this capability, or None if it can.
+    Embedding-only models can't answer chat requests; vision needs image input.
+    """
+    try:
+        caps = ollama_model_capabilities(model_name)
+    except Exception:
+        caps = None
+    if caps is None:
+        # Older Ollama: fall back to the naming convention for embedding models.
+        return f"'{model_name}' looks like an embedding model and can't answer chat requests" if "embed" in model_name.lower() else None
+    if "completion" not in caps:
+        return f"'{model_name}' can't answer chat requests (Ollama reports: {', '.join(sorted(caps)) or 'no capabilities'})"
+    if capability == "vision" and "vision" not in caps:
+        return f"'{model_name}' has no image input, so it can't serve vision tasks"
+    return None
+
+
+def clear_installed_cache() -> None:
+    with _installed_lock:
+        _installed_cache.update(at=0.0, models=None)
 
 
 def _candidates(capability: str, installed: set[str]) -> tuple[dict | None, list[str]]:
