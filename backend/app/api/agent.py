@@ -15,7 +15,7 @@ from app.api.documents import _get_accessible_document
 from app.config.model_registry import get_model_for_capability
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.services.audit_service import record, record_standalone, sha256
 
 logger = logging.getLogger(__name__)
@@ -140,7 +140,13 @@ def _start_run(db: Session, user: User, request: AgentRunRequest) -> tuple[str, 
         logger.exception("Audit write failed; refusing agent run")
         raise HTTPException(status_code=503, detail="Audit log unavailable; the agent was not run")
     # Written into the note by SOVARA itself (never left to the model).
-    run_meta = {"requested_by": user.email, "source_filename": source.filename if source else None}
+    run_meta = {
+        "requested_by": user.email,
+        "source_filename": source.filename if source else None,
+        # Used by retrieval to search only what this user may read.
+        "user_id": str(user.id),
+        "privileged": user.role in (UserRole.ADMIN, UserRole.MANAGER),
+    }
     return run_id, run_meta
 
 

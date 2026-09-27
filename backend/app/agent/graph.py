@@ -73,9 +73,14 @@ def retrieve_node(state: AgentState) -> dict:
     so the trace never presents "retrieval broke" as "nothing relevant found".
     """
     retrieval_error = None
+    meta = state.get("run_meta") or {}
     try:
+        if not meta.get("user_id"):
+            # Fail closed: without knowing who asks, don't search anything.
+            raise PermissionError("no requesting user; retrieval refused")
         query_embedding = get_embedding(state["user_input"])
-        raw_results = search(query_embedding, top_k=3)
+        raw_results = search(query_embedding, top_k=3,
+                             user_id=meta["user_id"], privileged=bool(meta.get("privileged")))
         context = [r.payload["text"] for r in raw_results]
         citations = [
             {
