@@ -9,6 +9,7 @@ from app.api.security import router as security_router
 from app.api.sandbox import router as sandbox_router
 from app.api.review import router as review_router
 from app.api.registry import router as registry_router
+from app.api.audit import router as audit_router
 
 app = FastAPI(title="SOVARA AI Backend", version="0.1.0")
 
@@ -29,6 +30,7 @@ app.include_router(security_router, prefix="/api")
 app.include_router(sandbox_router, prefix="/api")
 app.include_router(review_router, prefix="/api")
 app.include_router(registry_router, prefix="/api")
+app.include_router(audit_router, prefix="/api")
 
 
 @app.get("/health")

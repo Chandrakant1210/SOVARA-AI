@@ -1,5 +1,4 @@
 import hashlib
-import json
 import logging
 import re
 import time
@@ -10,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.audit_log import AuditLog
 from app.models.user import User, UserRole
+from app.services.audit_service import record as _audit
 from app.services.model_router import ModelUnavailableError, chat, resolve_model
 from app.services.sandbox_service import (
     MAX_CODE_CHARS,
@@ -80,11 +79,6 @@ def _extract_code(text: str) -> str:
     return (max(blocks, key=len) if blocks else text).strip()
 
 
-def _audit(db: Session, user_id, action: str, details: dict) -> None:
-    db.add(AuditLog(user_id=user_id, action=action, details=json.dumps(details)))
-    db.commit()
-
-
 @router.get("/sandbox/info")
 def sandbox_info(current_user: User = Depends(get_current_user)):
     """Real sandbox limits and availability, plus whether this user may run code."""
@@ -112,7 +106,8 @@ def run_sandbox(
     # The hash (not the code) is stored, so confidential scripts aren't
     # duplicated into the audit table but the exact code can still be proven.
     try:
-        _audit(db, user_id, "sandbox.run", {"code_sha256": code_sha256, "code_chars": len(request.code)})
+        _audit(db, user_id, "sandbox.run", {"summary": "Ran code in sandbox", "tool": "sandbox",
+                                            "code_sha256": code_sha256, "code_chars": len(request.code)})
     except Exception:
         db.rollback()
         logger.exception("Audit write failed; refusing sandbox run")
@@ -133,6 +128,8 @@ def run_sandbox(
 
     try:
         _audit(db, user_id, "sandbox.result", {
+            "summary": "Sandbox result", "tool": "sandbox",
+            "result": "timed out" if result["timed_out"] else (result["test_summary"] or f"exit {result['exit_code']}"),
             "run_id": result["run_id"],
             "code_sha256": code_sha256,
             "exit_code": result["exit_code"],
@@ -171,6 +168,7 @@ def generate_code(
     prompt_sha256 = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     try:
         _audit(db, user_id, "sandbox.generate", {
+            "summary": "Generated code", "tool": model["model_name"],
             "prompt_sha256": prompt_sha256, "prompt_chars": len(prompt),
             "model": model["model_name"], "capability_served": route["capability_served"],
         })
@@ -201,6 +199,7 @@ def generate_code(
 
     try:
         _audit(db, user_id, "sandbox.generate.result", {
+            "summary": "Generated code", "tool": model["model_name"], "result": "success",
             "prompt_sha256": prompt_sha256, "model": model["model_name"],
             "code_sha256": hashlib.sha256(code.encode("utf-8")).hexdigest(),
             "code_chars": len(code), "duration_ms": duration_ms,

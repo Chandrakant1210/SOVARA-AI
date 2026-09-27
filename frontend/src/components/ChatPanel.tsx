@@ -85,6 +85,7 @@ export default function ChatPanel({
               response: finalResponse,
               docxPath: finalDocxPath,
               citations: finalCitations,
+              runId: event.run_id ?? null,
             });
           } else if (event.type === "error") {
             throw new Error(event.detail ?? "Agent execution failed");

@@ -1,4 +1,3 @@
-import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,8 +7,8 @@ from sqlalchemy.orm import Session
 from app.config.model_registry import REGISTRABLE_CAPABILITIES, list_models, register_model, reload_registry
 from app.core.database import get_db
 from app.core.deps import get_current_user
-from app.models.audit_log import AuditLog
 from app.models.user import User, UserRole
+from app.services.audit_service import record as _audit
 from app.services.model_router import (
     CAPABILITY_LABELS,
     ModelUnavailableError,
@@ -33,11 +32,6 @@ class RegisterRequest(BaseModel):
     model_name: str = Field(..., min_length=1, max_length=200)
     capability: str
     description: str = Field("", max_length=200)
-
-
-def _audit(db: Session, user_id, action: str, details: dict) -> None:
-    db.add(AuditLog(user_id=user_id, action=action, details=json.dumps(details)))
-    db.commit()
 
 
 @router.get("/models/registry")
@@ -126,7 +120,8 @@ def reload(current_user: User = Depends(get_current_user), db: Session = Depends
     reload_registry()
     clear_installed_cache()
     try:
-        _audit(db, current_user.id, "registry.reload", {"models": len(list_models())})
+        _audit(db, current_user.id, "registry.reload", {"summary": "Reloaded model registry", "tool": "registry",
+                                                        "result": "success", "models": len(list_models())})
     except Exception:
         db.rollback()
         logger.exception("Audit write failed for registry reload")
@@ -157,7 +152,8 @@ def register(request: RegisterRequest, current_user: User = Depends(get_current_
         raise HTTPException(status_code=400, detail=problem)
 
     try:
-        _audit(db, current_user.id, "registry.register", {"model_name": info["name"], "capability": request.capability})
+        _audit(db, current_user.id, "registry.register", {"summary": f"Registered model {info['name']}", "tool": "registry",
+                                                          "result": "requested", "model_name": info["name"], "capability": request.capability})
     except Exception:
         db.rollback()
         logger.exception("Audit write failed; refusing registry change")
