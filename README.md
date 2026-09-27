@@ -12,40 +12,32 @@
 
 SOVARA AI is an **on-premise AI reasoning workbench** designed for confidential industrial knowledge work such as inspection reports, Standard Operating Procedures (SOPs), engineering documents, maintenance records, and operational documentation.
 
-Instead of functioning as a simple chatbot, SOVARA is designed as an **AI teammate with a structured reasoning workflow**. It can ingest private documents, retrieve relevant information, execute multi-step reasoning, validate outputs, and generate business-ready deliverables under human review.
+Instead of functioning as a simple chatbot, SOVARA is designed as an **AI teammate with a structured reasoning workflow**. It can ingest private documents, extract and validate engineering values, retrieve relevant information, execute multi-step reasoning, and generate business-ready deliverables — under human review and with a complete audit trail.
 
-The architecture is built around **local AI inference, private document retrieval, controlled execution, authentication, audit logging, and human-in-the-loop approval**.
+The architecture is built around **local AI inference, private access-controlled retrieval, controlled execution, authentication, role-based sign-off, audit logging, and human-in-the-loop approval**. The full workflow runs with **no outbound network connection**.
 
-### Core Workflow
+### Core Workflow (hero scenario)
 
 ```text
 Login
   ↓
-Upload Document
+Upload scanned inspection report
   ↓
-OCR / Vision Extraction
+OCR with per-line confidence and source boxes
   ↓
-Document Indexing
+Rule-based field extraction + engineering validation
   ↓
-Ask SOVARA
+Human corrections (audited, re-validated)
   ↓
-Understand
+Send findings to the agent
   ↓
-Plan
+Understand → Plan → Retrieve (access-filtered) → Reason → Validate → Generate
   ↓
-Retrieve
+Approval note (DOCX)
   ↓
-Reason
+Manager sign-off (no self-approval)
   ↓
-Validate
-  ↓
-Generate
-  ↓
-Human Review
-  ↓
-Approve / Modify / Reject
-  ↓
-DOCX Deliverable
+Activity Log + CSV export
 ```
 
 ---
@@ -66,7 +58,7 @@ Using external cloud-based AI services for confidential information can introduc
 
 Traditional document search systems can also require users to manually locate information across large collections of technical documents.
 
-SOVARA AI addresses this problem by providing a **local-first AI workbench** where document processing, retrieval, embeddings, AI inference, reasoning, and business-document generation can operate within the organization's controlled infrastructure.
+SOVARA AI addresses this problem by providing a **local-first AI workbench** where document processing, retrieval, embeddings, AI inference, reasoning, code execution, and business-document generation operate within the organization's controlled infrastructure.
 
 ---
 
@@ -74,15 +66,14 @@ SOVARA AI addresses this problem by providing a **local-first AI workbench** whe
 
 SOVARA combines several capabilities into one controlled AI workspace:
 
-* Local LLM inference through **Ollama**
-* Private document retrieval using **Qdrant**
+* Local LLM inference through **Ollama**, with a task-based **model router**
+* Private, **access-controlled** document retrieval using **Qdrant**
 * Multi-step agent orchestration using **LangGraph**
-* OCR and document processing using **PaddleOCR and PyMuPDF**
+* OCR and **rule-based engineering extraction** using **PaddleOCR and PyMuPDF**
 * Local PostgreSQL persistence
-* Network-isolated Docker sandbox execution
-* JWT-based authentication
-* Audit logging
-* Human-in-the-loop review
+* Hardened, network-disabled **Docker sandbox** with a pytest runner
+* JWT-based authentication and role-based access
+* **Segregation-of-duties sign-off** and a fail-closed **audit trail**
 * Automated DOCX document generation
 * Runtime security and network visibility
 
@@ -92,19 +83,20 @@ The objective is not simply to provide an AI chatbot, but to create a **controll
 
 # Key Features
 
-* 🔒 **Local-First AI Inference** — AI inference can run locally through Ollama.
-* 📄 **Document Intelligence** — Process PDFs, scanned reports, and images.
-* 🔎 **Private RAG** — Retrieve relevant information from locally indexed documents. Documents are automatically chunked and indexed at upload time, so newly uploaded material is searchable immediately.
-* 🧠 **Six-Stage Agent Workflow** — Understand → Plan → Retrieve → Reason → Validate → Generate.
-* 🤖 **Multi-Model Architecture** — Supports separate local models for reasoning, embeddings, and optional vision processing, selected via a config-driven model registry.
-* 👁️ **OCR & Vision Processing** — Extract information from scanned and visual documents.
-* 🛡️ **JWT Authentication** — Protected API routes with token-based authentication.
-* 👥 **Role Control** — Self-registration creates engineer-level accounts without client-side admin privilege escalation.
-* 🧪 **Network-Isolated Sandbox** — Docker-based Python execution with network isolation and resource limits.
-* 👨‍💼 **Human-in-the-Loop Review** — Generated outputs can be approved, modified, or rejected.
-* 📝 **DOCX Generation** — Generate structured business deliverables.
-* 📊 **Security Center** — Provides live runtime network and security measurements, including the currently active reasoning model, read directly from the model registry rather than hardcoded.
-* 📜 **Audit Logging** — Records relevant system activity for traceability.
+* 🔒 **Local-First AI Inference** — All inference runs locally through Ollama; no cloud APIs.
+* 🔬 **Scan Analysis** — PaddleOCR with per-line confidence and bounding boxes; fields, thickness readings and sign-off extracted by layout rules (**no LLM-generated values**); click any value to see its source on the page.
+* ✅ **Engineering Validation** — Recomputes corrosion rate, remaining life and margin to t-min from the raw readings, flags implausible values and domain errors (e.g. a design code OCR'd as "Sec. VII" instead of "VIII"), even when OCR confidence is high.
+* ✍️ **Audited Corrections** — Engineers correct OCR mistakes; each correction stores who, the original value, the new value and why, and is re-validated. Nothing is overwritten.
+* 📤 **Scan → Agent Hand-off** — Validated findings are sent to the agent with corrected and unconfirmed values clearly marked; the exact agent input is visible to the user.
+* 🧠 **Six-Stage Agent Workflow** — Understand → Plan → Retrieve → Reason → Validate → Generate, streamed live.
+* 🔎 **Access-Controlled RAG** — Every indexed chunk carries its owner and visibility; the filter runs inside Qdrant, so text a user may not read never reaches the model. Results are diversified so duplicates can't crowd out SOPs.
+* 👨‍💼 **Review & Sign-Off** — Review queue; approve, reject, or edit-then-sign; **managers and admins only**, and **nobody signs off a run they started**.
+* 📜 **Activity Log** — Role-scoped audit events, per-run traces (model/tool and measured duration per step), CSV export for compliance.
+* 🗂️ **Document Vault** — Server-backed document list with live index counts and audited deletion (file, index chunks and record).
+* 🧪 **Code Sandbox** — Hardened Docker execution with pytest; AI code generation with a dedicated coding model, grounded in private references and repaired until its tests pass; engineer-reviewed calculation examples.
+* 🤖 **Model Registry & Router** — Live model status from the GPU (loaded, VRAM, quantisation), routing per task with honest fallback reasons, admin registration of installed models.
+* 📝 **DOCX Generation** — Approval notes with readable file names and a system-written run-details table.
+* 📊 **Security Center** — Live runtime network and security measurements, including the currently active reasoning model read from the model registry.
 
 ---
 
@@ -115,53 +107,43 @@ The objective is not simply to provide an AI chatbot, but to create a **controll
                          │       SOVARA UI         │
                          │  Next.js + TypeScript   │
                          └────────────┬────────────┘
-                                      │
+                                      │ JWT
                                       ▼
                          ┌─────────────────────────┐
                          │       FastAPI API       │
-                         │ Authentication + APIs   │
-                         └────────────┬────────────┘
-                                      │
-                                      ▼
-                         ┌─────────────────────────┐
-                         │     LangGraph Agent     │
-                         │                         │
-                         │ Understand               │
-                         │ Plan                    │
-                         │ Retrieve                │
-                         │ Reason                  │
-                         │ Validate                │
-                         │ Generate                │
-                         └──────┬─────────┬────────┘
-                                │         │
-                  ┌─────────────┘         └─────────────┐
-                  ▼                                     ▼
-        ┌──────────────────┐                   ┌──────────────────┐
-        │      Qdrant      │                   │      Ollama      │
-        │   Private RAG    │                   │   Local Models   │
-        └────────┬─────────┘                   └──────────────────┘
-                 │
-                 ▼
-        ┌──────────────────┐
-        │  Private Docs    │
-        │ PDFs / Images /  │
-        │ SOPs / Reports   │
-        └────────┬─────────┘
-                 │
-                 ▼
-        ┌──────────────────┐
-        │ OCR / Vision     │
-        │ PaddleOCR /      │
-        │ Local Vision     │
-        └──────────────────┘
+                         │ Auth · RBAC · Sign-off  │
+                         └──┬─────────┬─────────┬──┘
+                            │         │         │
+             ┌──────────────┘         │         └──────────────┐
+             ▼                        ▼                        ▼
+   ┌──────────────────┐    ┌─────────────────────┐   ┌──────────────────┐
+   │  Scan Analysis   │    │   LangGraph Agent   │   │  Docker Sandbox  │
+   │ PaddleOCR +      │    │ Understand · Plan   │   │ No network ·     │
+   │ rule extraction +│───▶│ Retrieve · Reason   │   │ non-root · pytest│
+   │ validation       │    │ Validate · Generate │   └──────────────────┘
+   └──────────────────┘    └───┬─────────────┬───┘
+                               │             │
+                               ▼             ▼
+                 ┌──────────────────┐   ┌──────────────────────────┐
+                 │      Qdrant      │   │ Model Router + Registry  │
+                 │ Access-filtered  │   │ (models.yaml + live      │
+                 │ private RAG      │   │  Ollama status)          │
+                 └──────────────────┘   └────────────┬─────────────┘
+                                                     ▼
+                                        ┌──────────────────────────┐
+                                        │   Ollama (local GPU)     │
+                                        │ qwen3:8b · qwen2.5-coder │
+                                        │ :7b · nomic-embed-text   │
+                                        └──────────────────────────┘
 
-
-        ┌──────────────────┐       ┌──────────────────┐
-        │   PostgreSQL     │       │ Docker Sandbox   │
-        │ Users / Docs /   │       │ Network-Isolated │
-        │ Audit Logs       │       │ Python Execution │
-        └──────────────────┘       └──────────────────┘
+        ┌──────────────────────────┐     ┌──────────────────────────┐
+        │       PostgreSQL         │     │      python-docx         │
+        │ Users · Documents ·      │     │  Approval notes (DOCX)   │
+        │ Audit log                │     └──────────────────────────┘
+        └──────────────────────────┘
 ```
+
+More detail: [`docs/architecture.md`](docs/architecture.md).
 
 ---
 
@@ -173,31 +155,32 @@ SOVARA uses a six-stage LangGraph workflow to structure AI reasoning.
 | -------------- | -------------------------------------------------------------------------------- |
 | **Understand** | Interprets the user's request and identifies the task                            |
 | **Plan**       | Determines the steps and information required                                    |
-| **Retrieve**   | Searches the private document knowledge base                                     |
+| **Retrieve**   | Searches the private knowledge base — only documents the requesting user may read |
 | **Reason**     | Performs evidence-based reasoning using retrieved context                        |
 | **Validate**   | Checks the generated result against available evidence and workflow requirements |
-| **Generate**   | Produces the final response or business deliverable                              |
+| **Generate**   | Produces the approval note and a DOCX deliverable                                |
 
 This structured workflow is intended to make the AI process more controlled and traceable than a single unrestricted model call. In testing, the Validate stage has reliably flagged claims not explicitly supported by retrieved context (e.g. cited code references that weren't actually present in the source document), surfacing them for a human reviewer rather than presenting them as fact.
+
+Every run is traced: each step records its model or tool, a detail (e.g. "3 chunks", the generated file name) and its measured duration. If retrieval fails, the failure is recorded in the trace instead of the run silently continuing without context. The model's hidden "thinking" is only enabled for the Reason step, which roughly halved run time.
 
 ---
 
 # Technology Stack
 
-| Layer                   | Technology                                           |
-| ----------------------- | ---------------------------------------------------- |
-| **Frontend**            | Next.js 16, TypeScript, Tailwind CSS, IBM Plex fonts |
-| **Backend**             | FastAPI, Python                                      |
-| **Agent Orchestration** | LangGraph                                            |
-| **LLM Serving**         | Ollama                                               |
-| **Vector Database**     | Qdrant                                               |
-| **Database**            | PostgreSQL                                           |
-| **OCR**                 | PaddleOCR                                            |
-| **PDF Processing**      | PyMuPDF                                              |
-| **Vision Processing**   | Local vision model through Ollama                    |
-| **Authentication**      | JWT, python-jose, passlib/bcrypt                     |
-| **Sandbox**             | Docker                                               |
-| **Document Generation** | python-docx                                          |
+| Layer                   | Technology                                                         |
+| ----------------------- | ------------------------------------------------------------------ |
+| **Frontend**            | Next.js 16, React 19, TypeScript, Tailwind CSS, IBM Plex fonts, CodeMirror 6 (bundled, no CDN) |
+| **Backend**             | FastAPI, Python 3.11, SQLAlchemy                                    |
+| **Agent Orchestration** | LangGraph                                                          |
+| **LLM Serving**         | Ollama (vLLM is the planned production server)                     |
+| **Vector Database**     | Qdrant                                                             |
+| **Database**            | PostgreSQL                                                         |
+| **OCR**                 | PaddleOCR                                                          |
+| **PDF Processing**      | PyMuPDF                                                            |
+| **Authentication**      | JWT, python-jose, passlib/bcrypt                                   |
+| **Sandbox**             | Docker, custom offline image (`python:3.11-slim` + pinned pytest)  |
+| **Document Generation** | python-docx                                                        |
 
 ---
 
@@ -205,22 +188,34 @@ This structured workflow is intended to make the AI process more controlled and 
 
 SOVARA separates model responsibilities according to the task.
 
-| Model                     | Role                              |
-| ------------------------- | --------------------------------- |
-| **Qwen3:8B**              | Reasoning and response generation |
-| **nomic-embed-text**      | Document embeddings               |
-| **Optional vision model** | Visual document understanding     |
-
-The current default configuration uses:
+| Model                  | Role                                          |
+| ---------------------- | --------------------------------------------- |
+| **qwen3:8b**           | Reasoning, analysis, approval notes (agent)   |
+| **qwen2.5-coder:7b**   | Code generation in the Code Sandbox           |
+| **nomic-embed-text**   | Document embeddings                           |
+| *Vision model (optional)* | Visual document understanding — supported by the registry, not demonstrated |
 
 ```bash
 ollama pull qwen3:8b
+ollama pull qwen2.5-coder:7b
 ollama pull nomic-embed-text
 ```
 
-Additional local models can be configured through the project's model registry (`backend/app/config/models.yaml`) according to available hardware and integration support. Each model's `available` flag reflects whether it has actually been pulled on the running machine — the registry deliberately fails loudly (rather than silently falling back) if a capability is requested with no available model, to avoid ever calling a model that isn't actually installed.
+Models are declared in the registry (`backend/app/config/models.yaml`). A model counts as available only if it is **enabled in the registry and actually installed** in the local Ollama server (checked live). If no model for a task is available, the router falls back along an explicit chain (e.g. coding → reasoning) and **states the reason** in the UI; a capability with no usable model at all (e.g. vision today) is reported as unavailable rather than silently served by the wrong model. Admins can register installed models from the Model Registry page; models that can't chat (embedding models) or lack image input for vision are refused.
 
-For example, higher-capacity reasoning or vision models can be added when the deployment environment provides sufficient resources.
+### Tested hardware and performance
+
+| Component | Spec |
+| --- | --- |
+| Laptop | HP Victus 15 |
+| GPU | NVIDIA RTX 5050 Laptop GPU, 8 GB VRAM |
+| CPU / RAM | AMD Ryzen 7 260 · 24 GB |
+
+* qwen3:8b runs at **100% GPU, ~47 tokens/s**, 8k context, ~6.2 GB VRAM.
+* A full six-step agent run takes **~70 s** (down from 126 s after runtime tuning).
+* 14B models exceed 8 GB VRAM and are disabled in the registry; only one 7–8B model is resident at a time.
+
+Runtime settings (environment overrides): `SOVARA_NUM_CTX` (default 8192 — Ollama's own default of 4096 silently truncated long prompts), `SOVARA_KEEP_ALIVE` (default `30m`).
 
 ---
 
@@ -238,19 +233,41 @@ Authorization: Bearer <token>
 
 Tokens expire after 60 minutes. The frontend automatically clears an expired/invalid token and returns the user to the login screen on a 401 response.
 
-Self-registration creates an `engineer`-level account. There is no client-controllable registration path that grants administrator privileges.
+### Roles and Access
+
+Roles: **admin, manager, engineer, employee**. Self-registration creates an `engineer`-level account; there is no client-controllable path to higher privileges. Roles are changed only by the server operator (`manage_users.py`), and every change is audited; the last admin can't be demoted.
+
+| Action | Who |
+| --- | --- |
+| See all documents and activity | managers, admins |
+| Run / generate code, correct scan values | engineers, managers, admins |
+| Sign off approval notes | managers, admins — never on a run they started |
+| Reload / register models | managers (reload), admins (register) |
+
+### Access-Controlled Retrieval
+
+Every indexed chunk stores `owner_id`, `document_id` and `visibility`. Uploads are **private** by default (owner, managers, admins); reference SOPs are **shared**. The access filter is applied **inside Qdrant**, so restricted chunks never reach the backend or the model. Search requires the requesting user's identity — a caller that doesn't provide it fails instead of searching everything.
+
+### Fail-Closed Audit
+
+Agent runs, sandbox runs, corrections, sign-offs, deletions, registry changes and exports are **refused if the audit record can't be written**. Prompts, code and document text are stored as SHA-256 hashes, not copied into the audit log. Audit rows are never modified; older events are displayed with derived values instead of being rewritten.
 
 ### Network-Isolated Sandbox
 
 The Docker sandbox:
 
-* Executes Python code in an isolated container
-* Has network access disabled
-* Applies memory and CPU limits
-* Uses a hard execution timeout
-* Prevents unrestricted code execution from reaching external services
+* Executes Python code in an isolated container with **network disabled**
+* Runs as a **non-root** user with **all Linux capabilities dropped** and `no-new-privileges`
+* Uses a **read-only root filesystem** (small `/tmp` only)
+* Applies memory, CPU, process (64) and output limits and a hard **15-second timeout**
+* Allows at most 2 concurrent runs
+* **Never pulls images at run time** — the sandbox image must already be loaded locally
 
-The project's security validation includes checking that DNS/network resolution fails inside the isolated sandbox — confirmed by attempting an outbound HTTP request from within the sandbox and observing a `socket.gaierror` (name resolution failure), not just a generic connection error.
+The project's security validation checks that outbound access fails inside the sandbox (DNS resolution and direct-IP connections), that the process runs as uid 65534, and that the root filesystem is read-only.
+
+### Input and Output Safety
+
+Size limits on all inputs; path traversal blocked for uploads and generated notes (only server-issued file names resolve); YAML written with safe serialisation; CSV exports neutralise spreadsheet formulas (`=`, `+`, `-`, `@`).
 
 ### Runtime Network Visibility
 
@@ -285,63 +302,55 @@ Production deployment should use:
 
 SOVARA is designed so that AI-generated work does not automatically become the final business output.
 
-The workflow is:
-
 ```text
 AI Processing
      ↓
-Evidence-Based Output
+Evidence-Based Output (DRAFT)
      ↓
-Human Review
+Review queue (managers / admins)
      ↓
-┌───────────┬────────────┬──────────┐
-│  Approve  │   Modify   │  Reject  │
-└───────────┴────────────┴──────────┘
+┌───────────┬────────────────────┬──────────┐
+│  Approve  │ Edit, then sign off│  Reject  │
+└───────────┴────────────────────┴──────────┘
      ↓
-Final Deliverable
+Decision recorded in the audit trail
 ```
 
-This provides a review checkpoint before generated documents are treated as finalized business deliverables. "Modify" lets a reviewer directly edit the generated text before it's finalized as a DOCX, without re-running the agent.
+* **Segregation of duties:** whoever started a run can't sign it off; the starter is taken from the audit trail, not from the browser.
+* **One decision per run**, never overwritten; concurrent reviewers can't both sign.
+* Reviewers see the note, its citations and the run's trace; the decision (with an optional comment) appears in the Activity Log.
 
 ---
 
 # Document Intelligence
 
-Users can upload documents such as:
-
-* PDF files
-* Scanned reports
-* Images
-* SOPs
-* Technical documents
-
-The processing workflow is:
+Users can upload documents such as PDF files, scanned reports, images, SOPs and technical documents.
 
 ```text
 Document Upload
       ↓
 PDF / Image Processing
       ↓
-OCR / Vision Extraction
+OCR (PaddleOCR) — vision model fallback when available
       ↓
 Text Chunking
       ↓
 Embedding Generation
       ↓
-Qdrant Indexing
+Qdrant Indexing (private to the uploader)
       ↓
-Retrieval During Agent Execution
+Retrieval During Agent Execution (access-filtered)
 ```
 
-Indexing happens automatically at upload time — there is no separate manual step required. Once indexed, the document's content can immediately be retrieved when answering user questions, including questions asked in the same session right after upload.
+Indexing happens automatically at upload time. Documents can be deleted from the Document Vault by their owner, managers or admins; deletion removes the file, its index chunks and its record, and is audited.
+
+For **inspection reports**, Scan Analysis adds structured extraction on top of OCR: report fields, the thickness-reading table and sign-off are paired by layout, each value linked to its source line with its OCR confidence, then checked by engineering rules. The current extraction schema covers pressure-vessel visual and UT thickness inspection reports.
 
 ---
 
 # DOCX Deliverables
 
-SOVARA can generate real `.docx` business deliverables using `python-docx`.
-
-The generated output is intended to transform AI-assisted reasoning into a structured document that can be reviewed by a human before approval.
+SOVARA generates real `.docx` approval notes using `python-docx`. Each note has a readable file name (e.g. `Approval_Note_V-301-Inspection-Report_20260927-150408_92552a60.docx`) and a **run-details table written by SOVARA, not by the model**: status (draft pending sign-off), run ID, requested by, generation time, model and source document. The model is instructed not to write signature or date placeholders.
 
 ---
 
@@ -349,21 +358,21 @@ The generated output is intended to transform AI-assisted reasoning into a struc
 
 > Add real screenshots to `docs/screenshots/` and update the filenames below before submission — the paths below are placeholders and will not render until the images exist in the repo.
 
+### Scan Analysis
+
+![SOVARA Scan Analysis](docs/screenshots/scan.png)
+
 ### Agent Workspace
 
 ![SOVARA Agent Workspace](docs/screenshots/chat.png)
 
-### Document Intelligence
-
-![SOVARA Document Processing](docs/screenshots/documents.png)
-
-### Agent Workflow
-
-![SOVARA Agent Workflow](docs/screenshots/agent.png)
-
-### Human Review
+### Review & Sign-Off
 
 ![SOVARA Review Panel](docs/screenshots/review.png)
+
+### Activity Log
+
+![SOVARA Activity Log](docs/screenshots/activity.png)
 
 ### Security Center
 
@@ -373,33 +382,27 @@ The generated output is intended to transform AI-assisted reasoning into a struc
 
 # Demo
 
-The recommended demonstration flow is:
+The full SIH demo script — setup, warm-up order, a 7-minute click path, fallbacks and honest answers to likely judge questions — is in [`docs/DEMO.md`](docs/DEMO.md).
 
 ```text
-1. Login
+1. Wi-Fi off → Security Center
       ↓
-2. Upload confidential document
+2. Scan Analysis: V-301 report, source highlighting, domain check, live correction
       ↓
-3. OCR / Vision extraction
+3. Send findings to the agent → six-stage run on the local GPU
       ↓
-4. Document indexing
+4. Approval note with citations → engineer can't sign own run
       ↓
-5. Ask a question
+5. Manager signs off from the review queue
       ↓
-6. Watch the six-stage agent workflow
+6. Activity Log: full chain + trace + CSV export
       ↓
-7. Retrieve supporting information
+7. Code Sandbox: reviewed remaining-life calculation → Verified
       ↓
-8. Generate grounded response
-      ↓
-9. Review output
-      ↓
-10. Approve / Modify / Reject
-      ↓
-11. Generate DOCX deliverable
-      ↓
-12. Inspect Security Center
+8. Model Registry → Security Center: zero outbound connections
 ```
+
+The sample inspection report used in the demo is synthetic and marked as such.
 
 ---
 
@@ -412,6 +415,8 @@ Before running SOVARA locally, install:
 * **Docker Desktop**
 * **Ollama**
 * **Git**
+
+An NVIDIA GPU with **8 GB+ VRAM** is recommended.
 
 > **Python version:** Python 3.11 is recommended for the current PaddleOCR/PaddlePaddle environment used by the project. Newer Python versions (e.g. 3.14) do not yet have compatible PaddlePaddle wheels available.
 
@@ -440,7 +445,7 @@ cd SOVARA-AI
 
 ## 2. Configure Environment Variables
 
-Create a `.env` file at the repository root:
+Create a `.env` file at the repository root (see `.env.example`):
 
 ```env
 POSTGRES_USER=sovara
@@ -465,7 +470,7 @@ before startup. It will fail to start (rather than silently using an insecure de
 
 ---
 
-# 3. Start Infrastructure
+## 3. Start Infrastructure
 
 Start PostgreSQL and Qdrant:
 
@@ -485,12 +490,11 @@ You should see the PostgreSQL and Qdrant services running.
 
 ---
 
-# 4. Pull Local Models
-
-Install the default reasoning and embedding models:
+## 4. Pull Local Models (one-time, while online)
 
 ```bash
 ollama pull qwen3:8b
+ollama pull qwen2.5-coder:7b
 ollama pull nomic-embed-text
 ```
 
@@ -502,7 +506,17 @@ ollama list
 
 ---
 
-# 5. Backend Setup
+## 5. Build the Sandbox Image (one-time, while online)
+
+```bash
+docker build -t sovara-sandbox:py311 backend/sandbox
+```
+
+The sandbox never downloads images at run time. For an air-gapped server, transfer the image as a file: `docker save sovara-sandbox:py311 -o sovara-sandbox.tar` on a connected machine, then `docker load -i sovara-sandbox.tar` on the server.
+
+---
+
+## 6. Backend Setup
 
 Navigate to the backend:
 
@@ -544,164 +558,102 @@ The initialization script creates the required application tables.
 
 ---
 
-# 6. Index Sample Documents
+## 7. Index the Knowledge Base
 
-SOVARA includes sample SOP documents for testing the retrieval pipeline.
-
-Run:
+SOVARA includes sample SOP documents for testing the retrieval pipeline. Index them as **shared** reference material:
 
 ```bash
 python ingest_sop_docs.py
 ```
 
-This indexes the sample documents into Qdrant.
+This is safe to re-run (each SOP's previous chunks are replaced, not duplicated). Uploaded documents are indexed automatically, privately to their uploader.
 
-This step is optional if you plan to upload your own documents — uploaded documents are indexed automatically as part of the upload process.
+To rebuild the whole index with correct ownership (e.g. after upgrading from a version without access control):
+
+```bash
+python reindex_rag.py --yes
+```
 
 ---
 
-# 7. Start the Backend
-
-Run:
+## 8. Start the Backend
 
 ```bash
 uvicorn app.main:app --port 8000
 ```
 
-The API will be available at:
-
-```text
-http://localhost:8000
-```
-
-FastAPI documentation:
-
-```text
-http://localhost:8000/docs
-```
-
-The API documentation exposes the available backend endpoints, including authentication, chat, documents, retrieval, agent execution, security, sandbox, and review functionality.
+The API will be available at `http://localhost:8000`; FastAPI documentation at `http://localhost:8000/docs`.
 
 ---
 
-# 8. Start the Frontend
+## 9. Start the Frontend
 
-Open a separate terminal.
-
-Navigate to the frontend:
+Open a separate terminal:
 
 ```bash
 cd frontend
-```
-
-Install dependencies:
-
-```bash
 npm install
-```
-
-Start the development server:
-
-```bash
 npm run dev
 ```
 
-Open:
+Open `http://localhost:3000`. For demos, a production build is faster: `npm run build` then `npm run start`.
 
-```text
-http://localhost:3000
+---
+
+## 10. Users and Roles
+
+New self-registered accounts are engineers. Assign other roles from the server (with the backend venv active):
+
+```bash
+python manage_users.py list
+python manage_users.py set-role someone@example.com manager
+python manage_users.py set-role admin@example.com admin
 ```
+
+A sign-off demo needs at least one **engineer** (who runs the agent) and one **manager** (who signs off).
 
 ---
 
 # First Run
 
-After starting the backend and frontend:
-
 ### 1. Create an account
 
-On the login screen, select:
+On the login screen, select **New here? Create an account** and register. New accounts are engineers.
 
-```text
-New here? Create an account
-```
+### 2. Analyse a scan
 
-Register with an email and password.
+Open **Scan Analysis**, upload a scanned inspection report, and review the extracted fields, readings and validation checks. Correct any OCR mistakes with ✎.
 
-New self-registered accounts are created with the `engineer` role.
+### 3. Send findings to the agent
 
----
+Click **Send findings to agent**, review the task in **AI Assistant**, and press **Ask**. The six stages show live progress.
 
-### 2. Open Chat
+### 4. Sign off
 
-After authentication, navigate to the Chat interface.
+As a **manager** (a different account), open **Review & Sign-Off**, open the run from the review queue, and approve, edit-then-sign, or reject.
 
-You can use one of the example prompts or ask a question related to the indexed sample SOP documents.
+### 5. Check the trail
 
-Example:
+Open **Activity Log** to see the whole chain, click the run for its trace, and export CSV.
 
-> What is the bearing temperature limit for pump maintenance?
+### 6. Other tools
 
----
-
-### 3. Upload a Document
-
-Open the **Documents** section.
-
-Upload:
-
-* PDF
-* scanned report
-* image
-* technical document
-
-The document is processed (OCR/vision extraction) and automatically indexed for retrieval — no separate indexing step is needed.
+* **Document Vault** — manage uploads and their index state.
+* **Code Sandbox** — run code in the isolated container; load a reviewed example or generate code with the coding model.
+* **Model Registry** — see which model serves which task and what's loaded on the GPU.
+* **Security Center** — live runtime network measurements.
 
 ---
 
-### 4. Run an Agent Task
+# Operator Tools
 
-Ask SOVARA a question related to the uploaded or indexed documents.
+| Command (from `backend/`, venv active) | Purpose |
+| --- | --- |
+| `python manage_users.py list` / `set-role EMAIL ROLE` | Manage roles (audited; the last admin can't be demoted) |
+| `python ingest_sop_docs.py` | Load shared SOPs without duplicates |
+| `python reindex_rag.py --yes` | Rebuild the vector index with ownership and visibility (audited) |
 
-The agent executes the six-stage workflow, with live progress shown in the UI as each stage completes:
-
-```text
-Understand
-    ↓
-Plan
-    ↓
-Retrieve
-    ↓
-Reason
-    ↓
-Validate
-    ↓
-Generate
-```
-
----
-
-### 5. Review the Result
-
-Open the **Review** section.
-
-The generated result can be:
-
-* Approved
-* Modified
-* Rejected
-
----
-
-### 6. Generate the Deliverable
-
-After review, SOVARA produces the final `.docx` deliverable.
-
----
-
-### 7. Inspect Security Center
-
-The Security Center provides live runtime security information, including observed network measurements from the backend process and the currently active reasoning model.
+Environment overrides: `SOVARA_NUM_CTX` (default `8192`), `SOVARA_KEEP_ALIVE` (default `30m`), `SANDBOX_IMAGE` (default `sovara-sandbox:py311`).
 
 ---
 
@@ -712,52 +664,37 @@ SOVARA-AI/
 │
 ├── backend/
 │   ├── app/
-│   │   ├── agent/
-│   │   │   └── # LangGraph state and six-node agent graph
-│   │   │
-│   │   ├── api/
-│   │   │   └── # FastAPI routers
-│   │   │      ├── auth
-│   │   │      ├── chat
-│   │   │      ├── documents
-│   │   │      ├── retrieve
-│   │   │      ├── agent
-│   │   │      ├── security
-│   │   │      ├── sandbox
-│   │   │      └── review
-│   │   │
-│   │   ├── core/
-│   │   │   └── # Configuration, database, JWT security and dependencies
-│   │   │
-│   │   ├── config/
-│   │   │   └── # Model registry and configuration
-│   │   │
-│   │   ├── models/
-│   │   │   └── # SQLAlchemy database models
-│   │   │
-│   │   └── services/
-│   │       └── # OCR, embeddings, Qdrant, sandbox and DOCX services
+│   │   ├── agent/            # LangGraph state and six-node agent graph
+│   │   ├── api/              # FastAPI routers
+│   │   │                     #   auth, chat, documents, retrieve, agent, security,
+│   │   │                     #   sandbox, review, registry, audit
+│   │   ├── core/             # Configuration, database, JWT security and dependencies
+│   │   ├── config/           # Model registry (models.yaml)
+│   │   ├── models/           # SQLAlchemy models (users, documents, audit log)
+│   │   └── services/         # OCR, scan extraction, embeddings, Qdrant, model router,
+│   │                         #   sandbox, audit and DOCX services
 │   │
-│   ├── sample_docs/
-│   │   └── # Sample SOP documents
-│   │
+│   ├── sandbox/Dockerfile    # Offline sandbox image (python:3.11-slim + pytest)
+│   ├── sample_docs/          # Sample SOP documents (shared knowledge base)
 │   ├── requirements.txt
 │   ├── init_db.py
-│   └── ingest_sop_docs.py
+│   ├── ingest_sop_docs.py
+│   ├── reindex_rag.py        # Operator: rebuild index with access control
+│   └── manage_users.py       # Operator: audited role changes
 │
 ├── frontend/
 │   └── src/
-│       ├── app/
-│       │   └── # Next.js application routes
-│       │
-│       ├── components/
-│       │   └── # Chat, Documents, Review, Security and UI components
-│       │
-│       └── lib/
-│           ├── api.ts
-│           └── AuthContext.tsx
+│       ├── app/              # Next.js routes (landing page, console)
+│       ├── components/       # Chat, Scan Analysis, Documents, Review, Code Sandbox,
+│       │                     #   Model Registry, Activity Log, Security and UI components
+│       └── lib/              # api.ts, AuthContext.tsx, ThemeContext.tsx
+│
+├── docs/
+│   ├── architecture.md
+│   └── DEMO.md               # SIH demo script
 │
 ├── docker-compose.yml
+├── .env.example
 └── README.md
 ```
 
@@ -767,57 +704,45 @@ SOVARA-AI/
 
 # Testing
 
-The project can be tested through the FastAPI documentation:
+The project can be tested through the FastAPI documentation at `http://localhost:8000/docs`. Important areas to validate:
 
-```text
-http://localhost:8000/docs
-```
+### Authentication and Roles
 
-Important areas to validate include:
+* Registration, login, JWT expiry handling, unauthorized route protection
+* Engineers can't sign off; nobody can sign off their own run
+* Role changes only via `manage_users.py`, and audited
 
-### Authentication
+### Scan Analysis
 
-* User registration
-* Login
-* JWT authentication
-* Expired token handling
-* Unauthorized route protection
+* OCR confidence and source boxes; extracted fields and readings
+* Validation checks (recomputed rate and remaining life, t-min margin, implausible readings)
+* Corrections are audited, re-validated, and never overwrite the original
 
-### Document Processing
+### Retrieval
 
-* PDF upload
-* Image/scanned document processing
-* OCR extraction
-* Document indexing
-* Retrieval
+* An engineer retrieves shared SOPs and only their own uploads
+* Managers and admins retrieve all documents
+* Duplicate uploads don't crowd out SOP chunks
 
 ### Agent Workflow
 
-* Understand
-* Plan
-* Retrieve
-* Reason
-* Validate
-* Generate
+* Six stages, per-step trace with measured durations
+* Retrieval failures appear in the trace
+* Findings hand-off links the run to its source document
 
 ### Sandbox
 
-* Python execution
-* Network isolation
-* Resource limits
-* Execution timeout
+* Network isolation, non-root user, read-only filesystem, resource limits, timeout
+* pytest summaries; generation repair loop stops after 3 attempts and never claims "verified" on failure
 
-### Review Workflow
+### Review and Audit
 
-* Approve
-* Modify
-* Reject
+* Review queue, approve / edit-then-sign / reject, one decision per run
+* Activity Log scope by role, run traces, CSV export (formula-safe)
 
 ### Security Center
 
-* Runtime network measurements
-* Backend connection visibility
-* Active model reflects the real registry state
+* Runtime network measurements and the active model from the registry
 
 ---
 
@@ -825,64 +750,56 @@ Important areas to validate include:
 
 ## Implemented
 
-The current project includes:
-
-* Local Ollama-based AI inference
-* Qdrant-based document retrieval, with automatic indexing on upload
+* Local Ollama-based AI inference with a live, task-based model router and registry UI
+* Access-controlled Qdrant retrieval, automatic indexing on upload, audited document deletion
 * PostgreSQL persistence
-* OCR-based document ingestion
-* LangGraph agent workflow (all six stages)
-* JWT authentication with auto-redirect on token expiry
-* Engineer-level self-registration with no client-side privilege escalation path
-* Docker-based sandbox with verified network isolation
-* Human review workflow (Approve / Modify / Reject)
-* DOCX generation
+* OCR-based ingestion and rule-based Scan Analysis with engineering validation and audited corrections
+* Scan → agent findings hand-off
+* LangGraph agent workflow (all six stages) with per-step audit traces
+* JWT authentication with auto-redirect on token expiry; role-based access; operator role management
+* Review queue and sign-off with segregation of duties
+* Activity Log with run traces and CSV export
+* Hardened Docker sandbox with pytest, grounded code generation with a repair loop, reviewed examples
+* DOCX approval notes with system-written run details
 * Security Center with live network measurements and dynamic active-model display
-* Audit logging
+* Fail-closed audit logging
 
 ## Planned / Extendable
 
-Potential future extensions include:
-
-* Additional local LLM providers
-* More advanced vision models
-* Per-document RAG management (viewing/removing individual indexed documents)
-* Document deletion and re-indexing controls
+* Encryption of stored uploads and generated notes at rest
+* Security Center event history and per-run network measurement
+* vLLM serving and larger models on server GPUs
+* Vision-model analysis of drawings and P&IDs (the registry supports it; not demonstrated)
+* Sharing a private document with specific colleagues
 * Additional sandbox runtimes (beyond Python)
-* Expanded enterprise authentication
-* Production-grade deployment and infrastructure hardening
+* Automated test suite and CI
+* Expanded enterprise authentication and production deployment hardening
 
 ---
 
 # Known Limitations
 
-* OCR and vision accuracy depends on document/image quality.
+* OCR accuracy depends on document/image quality; Scan Analysis currently has one extraction schema (pressure-vessel inspection reports).
+* A 7–8B local model can produce weak engineering logic; AI-generated code is only marked "Verified" when its own tests pass in the sandbox, which doesn't prove the engineering is correct (stated in the UI).
 * The Docker sandbox currently supports Python execution only.
-* There is currently no complete per-document management/deletion interface for the RAG index — uploaded documents remain indexed indefinitely.
+* Signatures on scanned reports can't be verified by OCR and are always marked for visual check.
+* The scan-audit de-duplication and OCR page cache are in memory and reset when the backend restarts.
 * The included Docker configuration is intended for local development rather than production deployment.
-* Hardware requirements vary depending on the selected local AI models.
+* Hardware requirements vary depending on the selected local AI models; 14B models need more than 8 GB VRAM.
 
 ---
 
 # Development Notes
 
-For local development, it is recommended to run the project from a normal local directory rather than a cloud-synchronized folder.
+For local development, it is recommended to run the project from a normal local directory rather than a cloud-synchronized folder, for example `C:\Projects\SOVARA-AI`, rather than a continuously synchronized directory (e.g. inside OneDrive/Dropbox). Cloud sync can interfere with the Python virtual environment, cause files to be silently evicted from local disk, and trigger unstable reload loops in development servers.
 
-For example:
-
-```text
-C:\Projects\SOVARA-AI
-```
-
-rather than a continuously synchronized directory (e.g. inside OneDrive/Dropbox). Cloud sync can interfere with the Python virtual environment, cause files to be silently evicted from local disk, and trigger unstable reload loops in development servers.
-
-If port `5432` is already occupied by another PostgreSQL installation, Docker PostgreSQL may fail to start, or connections may silently route to the wrong server.
-
-On Windows, the following command can help identify the process using the port:
+If port `5432` is already occupied by another PostgreSQL installation, Docker PostgreSQL may fail to start, or connections may silently route to the wrong server. On Windows:
 
 ```bash
 netstat -ano | findstr :5432
 ```
+
+After merging a pull request, start new work on a fresh branch from `main`; commits pushed to an already-merged branch don't reach `main`.
 
 ---
 
@@ -890,22 +807,18 @@ netstat -ano | findstr :5432
 
 SOVARA is designed with security and data control as first-class architectural concerns.
 
-The current implementation includes:
-
 ```text
 Local AI inference
        +
-Private vector retrieval
+Access-controlled private retrieval
        +
-JWT authentication
+JWT authentication + role-based access
        +
-Role restrictions
+Segregation-of-duties sign-off
        +
-Network-isolated sandbox
+Hardened, network-disabled sandbox
        +
-Resource limits
-       +
-Audit logging
+Fail-closed audit trail
        +
 Human approval
 ```
