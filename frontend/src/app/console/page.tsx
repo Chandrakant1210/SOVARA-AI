@@ -12,6 +12,7 @@ import DocumentsPanel from "@/components/DocumentsPanel";
 import { useAuth } from "@/lib/AuthContext";
 import ScanAnalysisPanel from "@/components/ScanAnalysisPanel";
 import CodeSandboxPanel from "@/components/CodeSandboxPanel";
+import ModelRegistryPanel from "@/components/ModelRegistryPanel";
 
 export type AgentResult = {
   response: string;
@@ -20,7 +21,6 @@ export type AgentResult = {
 };
 
 const COMING_SOON: Record<string, string> = {
-  Models: "Model Registry UI -- coming soon.",
   Audit: "Activity Log UI -- coming soon.",
 };
 
@@ -57,7 +57,8 @@ export default function Console() {
           {tab === "Security" && <SecurityPanel />}
           {tab === "Scan" && <ScanAnalysisPanel />}
           {tab === "Sandbox" && <CodeSandboxPanel />}
-          {(tab === "Models" || tab === "Audit") && (
+          {tab === "Models" && <ModelRegistryPanel />}
+          {tab === "Audit" && (
             <div className="flex items-center justify-center h-full px-8">
               <p className="text-sm text-[var(--text-muted)] max-w-sm text-center leading-relaxed">
                 {COMING_SOON[tab]}

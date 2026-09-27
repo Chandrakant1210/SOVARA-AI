@@ -18,3 +18,6 @@ Thumbs.db
 backend/uploads/
 backend/generated_docs/
 backend/sovara.db
+
+# Model registry backups written on registration
+backend/app/config/*.bak
