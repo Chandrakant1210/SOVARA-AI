@@ -1,4 +1,5 @@
-﻿import os
+﻿import logging
+import os
 import threading
 from collections import OrderedDict
 
@@ -7,6 +8,8 @@ import fitz  # PyMuPDF
 import ollama
 from paddleocr import PaddleOCR
 from app.config.model_registry import get_model_for_capability
+
+logger = logging.getLogger(__name__)
 
 # Initialize once at module load — loading the model is expensive,
 # we don't want to reload it on every request.
@@ -105,7 +108,13 @@ def extract_text_with_fallback(file_path: str) -> str:
     if len(ocr_text.strip()) >= MIN_TEXT_LENGTH:
         return ocr_text
 
-    return extract_text_with_vision(file_path)
+    try:
+        return extract_text_with_vision(file_path)
+    except Exception:
+        # No vision model installed (or it failed): keep what OCR found
+        # rather than failing the whole upload.
+        logger.warning("Vision fallback unavailable for %s; using OCR text only", file_path, exc_info=True)
+        return ocr_text
 
 
 # ---------------------------------------------------------------------------
