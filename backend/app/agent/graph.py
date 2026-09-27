@@ -155,12 +155,16 @@ def generate_node(state: AgentState) -> dict:
         "Structure it with a brief summary, key findings, and a clear "
         "recommendation. Include a short 'Reviewer Notes' section using "
         "the validation notes provided, so a human reviewer knows what "
-        "to double-check. Use **bold** markdown for section headers.\n\n"
+        "to double-check. Use **bold** markdown for section headers. "
+        "Do NOT write signature lines, names, dates, or placeholders such as "
+        "[Your Name] or [Insert Date]; SOVARA adds the run details and the "
+        "sign-off record automatically.\n\n"
         f"Analysis: {state['reasoning_output']}\n\n"
         f"Validation notes: {state.get('validation_notes') or '(none)'}"
     )
     final_output = _call_reasoning_model(prompt)
-    docx_path = generate_approval_note(final_output, title="SOVARA AI — Approval Note")
+    docx_path = generate_approval_note(final_output, title="SOVARA AI — Approval Note",
+                                       metadata=state.get("run_meta"))
     return {
         "final_output": final_output,
         "docx_path": docx_path,

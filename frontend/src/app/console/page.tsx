@@ -11,6 +11,7 @@ import ReviewPanel from "@/components/ReviewPanel";
 import DocumentsPanel from "@/components/DocumentsPanel";
 import { useAuth } from "@/lib/AuthContext";
 import ScanAnalysisPanel from "@/components/ScanAnalysisPanel";
+import type { FindingsHandoff } from "@/components/ScanAnalysisPanel";
 import CodeSandboxPanel from "@/components/CodeSandboxPanel";
 import ModelRegistryPanel from "@/components/ModelRegistryPanel";
 import ActivityLogPanel from "@/components/ActivityLogPanel";
@@ -22,10 +23,11 @@ export type AgentResult = {
   runId: string | null;
 };
 
-
 export default function Console() {
   const [tab, setTab] = useState<NavKey>("Chat");
   const [lastResult, setLastResult] = useState<AgentResult | null>(null);
+  // Findings sent from Scan Analysis, waiting to be attached in AI Assistant.
+  const [handoff, setHandoff] = useState<FindingsHandoff | null>(null);
   const { isAuthenticated, loading } = useAuth();
 
   if (loading) {
@@ -40,6 +42,11 @@ export default function Console() {
     return <LoginScreen />;
   }
 
+  const sendToAgent = (findings: FindingsHandoff) => {
+    setHandoff(findings);
+    setTab("Chat");
+  };
+
   return (
     <div className="h-screen flex flex-col bg-[var(--bg)]">
       <TopBar />
@@ -47,14 +54,19 @@ export default function Console() {
         <Sidebar active={tab} onChange={setTab} />
         <main className="flex-1 overflow-hidden">
           {tab === "Chat" && (
-            <ChatPanel onResult={setLastResult} onGoToReview={() => setTab("Review")} />
+            <ChatPanel
+              onResult={setLastResult}
+              onGoToReview={() => setTab("Review")}
+              handoff={handoff}
+              onHandoffCleared={() => setHandoff(null)}
+            />
           )}
           {tab === "Documents" && <DocumentsPanel />}
           {tab === "Review" && (
             <ReviewPanel result={lastResult} onClear={() => setLastResult(null)} />
           )}
           {tab === "Security" && <SecurityPanel />}
-          {tab === "Scan" && <ScanAnalysisPanel />}
+          {tab === "Scan" && <ScanAnalysisPanel onSendToAgent={sendToAgent} />}
           {tab === "Sandbox" && <CodeSandboxPanel />}
           {tab === "Models" && <ModelRegistryPanel />}
           {tab === "Audit" && <ActivityLogPanel />}

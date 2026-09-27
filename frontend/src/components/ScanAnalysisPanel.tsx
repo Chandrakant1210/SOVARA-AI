@@ -2,7 +2,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Upload, ChevronLeft, ChevronRight, Loader2, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
+import { Upload, ChevronLeft, ChevronRight, Loader2, CheckCircle2, AlertTriangle, XCircle, Pencil, Send } from "lucide-react";
 import { authFetch } from "@/lib/api";
 
 // ---------- API types ----------
@@ -28,6 +28,8 @@ type Source = { page: number; text: string; confidence: number; bbox: Bbox }; //
 
 type FieldStatus = "ok" | "review" | "pending" | "manual" | "not_found";
 
+type Correction = { original: string | number | null; by: string | null; at: string | null; reason: string | null };
+
 type ExtractedField = {
   key: string;
   label: string;
@@ -35,6 +37,7 @@ type ExtractedField = {
   status: FieldStatus;
   reasons: string[];
   source: Source | null;
+  corrected?: Correction | null;
 };
 
 type Reading = {
@@ -48,6 +51,7 @@ type Reading = {
   status: "ok" | "review";
   reasons: string[];
   sources: Record<string, Source>;
+  corrected?: Record<string, Correction>;
 };
 
 type Check = { id: string; title: string; status: "pass" | "warn" | "fail"; detail: string; source?: Source };
@@ -59,10 +63,24 @@ type Extraction = {
   readings: Reading[];
   reading_years: { previous: number | null; current: number | null };
   checks: Check[];
-  summary: { needs_review: number; not_found: number; failed_checks: number; warnings: number };
+  summary: { needs_review: number; not_found: number; failed_checks: number; warnings: number; corrected?: number };
   page_count: number;
   pages_analyzed: number;
+  document_id: string;
+  filename: string;
+  can_correct: boolean;
 };
+
+/** Findings handed from Scan Analysis to the AI Assistant. */
+export type FindingsHandoff = { documentId: string; filename: string; text: string; needsReview: number };
+
+type Editing = { target: string; values: Record<string, string>; reason: string };
+
+const READING_COLUMNS = ["nominal", "previous", "current"] as const;
+
+function correctionNote(c: Correction): string {
+  return `Corrected by ${c.by ?? "reviewer"}; OCR read "${c.original ?? ""}"${c.reason ? ` \u2014 ${c.reason}` : ""}`;
+}
 
 // ---------- helpers ----------
 
@@ -123,7 +141,7 @@ const cardTitle = "text-[11px] font-mono font-semibold tracking-[0.08em]";
 
 // ---------- component ----------
 
-export default function ScanAnalysisPanel() {
+export default function ScanAnalysisPanel({ onSendToAgent }: { onSendToAgent?: (handoff: FindingsHandoff) => void } = {}) {
   const [docs, setDocs] = useState<DocumentSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pageIndex, setPageIndex] = useState(0);
@@ -138,6 +156,9 @@ export default function ScanAnalysisPanel() {
   const [activeLine, setActiveLine] = useState<number | null>(null);
   const [highlight, setHighlight] = useState<Source | null>(null);
   const [view, setView] = useState<"fields" | "ocr">("fields");
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const [savingCorrection, setSavingCorrection] = useState(false);
+  const [sending, setSending] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const loadDocs = useCallback(async (selectAfter?: string) => {
@@ -250,30 +271,131 @@ export default function ScanAnalysisPanel() {
   const showHighlight = highlight && highlight.page - 1 === pageIndex && !analyzing;
   const years = extraction?.reading_years;
 
+  // Each changed value is recorded as its own audited correction.
+  const saveCorrection = async () => {
+    if (!editing || !extraction) return;
+    const changes = Object.entries(editing.values).filter(([, v]) => v.trim() !== "");
+    if (changes.length === 0) return;
+    setSavingCorrection(true);
+    setExtractError(null);
+    try {
+      let latest: Extraction | null = null;
+      for (const [target, value] of changes) {
+        const res = await authFetch(`/api/documents/${extraction.document_id}/corrections`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target, value: value.trim(), reason: editing.reason }),
+        });
+        if (!res.ok) throw new Error(await readError(res));
+        latest = await res.json();
+      }
+      if (latest) setExtraction(latest);
+      setEditing(null);
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Correction failed");
+    } finally {
+      setSavingCorrection(false);
+    }
+  };
+
+  const sendFindings = async () => {
+    if (!extraction || !onSendToAgent) return;
+    setSending(true);
+    setExtractError(null);
+    try {
+      const res = await authFetch(`/api/documents/${extraction.document_id}/findings`, { method: "POST" });
+      if (!res.ok) throw new Error(await readError(res));
+      const data = await res.json();
+      onSendToAgent({ documentId: data.document_id, filename: data.filename, text: data.text, needsReview: data.summary.needs_review });
+    } catch (err) {
+      setExtractError(err instanceof Error ? err.message : "Could not prepare findings");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const renderEditor = (title: string, fields: { target: string; label: string; current: string }[]) => (
+    <div className="my-2 rounded-lg border p-3 flex flex-col gap-2" style={{ borderColor: "var(--accent)", background: "var(--bg)" }}>
+      <span className="text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Correct {title}</span>
+      {fields.map((fld) => (
+        <label key={fld.target} className="flex items-center gap-2 text-xs" style={{ color: "var(--text-secondary)" }}>
+          <span className="w-20 shrink-0">{fld.label}</span>
+          <input
+            value={editing?.values[fld.target] ?? ""}
+            onChange={(e) => setEditing((ed) => (ed ? { ...ed, values: { ...ed.values, [fld.target]: e.target.value } } : ed))}
+            placeholder={fld.current || "value"}
+            maxLength={200}
+            className="flex-1 rounded border px-2 py-1.5 text-sm bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+            style={{ borderColor: "var(--border)" }}
+          />
+        </label>
+      ))}
+      <input
+        value={editing?.reason ?? ""}
+        onChange={(e) => setEditing((ed) => (ed ? { ...ed, reason: e.target.value } : ed))}
+        placeholder="Reason, e.g. checked against the scan (recorded in the audit log)"
+        maxLength={300}
+        className="rounded border px-2 py-1.5 text-xs bg-transparent text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+        style={{ borderColor: "var(--border)" }}
+      />
+      <div className="flex gap-2">
+        <button onClick={saveCorrection} disabled={savingCorrection} className="text-xs font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50" style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>
+          {savingCorrection ? "Saving..." : "Save correction"}
+        </button>
+        <button onClick={() => setEditing(null)} disabled={savingCorrection} className="text-xs px-3 py-1.5 rounded-lg" style={{ color: "var(--text-muted)" }}>Cancel</button>
+      </div>
+    </div>
+  );
+
   const renderFieldRow = (f: ExtractedField) => {
     const badge = STATUS_BADGE[f.status];
     const clickable = !!f.source;
     const selected = !!(highlight && f.source && highlight.page === f.source.page && highlight.bbox.join() === f.source.bbox.join());
+    const target = `field:${f.key}`;
+    const editable = !!extraction?.can_correct && !f.key.endsWith("_signature");
+    if (editing?.target === target) {
+      return <div key={f.key}>{renderEditor(f.label, [{ target, label: "New value", current: f.value ?? "" }])}</div>;
+    }
     return (
-      <button
+      <div
         key={f.key}
-        type="button"
+        role="button"
+        tabIndex={clickable ? 0 : -1}
         onClick={() => showSource(f.source)}
-        disabled={!clickable}
-        className="w-full text-left grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_120px_180px] items-center gap-3 py-3 px-2 -mx-2 rounded border-b last:border-b-0 transition-colors disabled:cursor-default"
+        className={`w-full text-left grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_120px_180px] items-center gap-3 py-3 px-2 -mx-2 rounded border-b last:border-b-0 transition-colors ${clickable ? "cursor-pointer" : ""}`}
         style={{ borderColor: "var(--border)", background: selected ? "var(--accent-soft-bg)" : "transparent" }}
-        title={f.reasons.join("\n") || undefined}
+        title={f.corrected ? correctionNote(f.corrected) : f.reasons.join("\n") || undefined}
       >
         <span className="text-sm" style={{ color: "var(--text-secondary)" }}>{f.label}</span>
         <span className="min-w-0">
           <span className="block text-sm font-semibold truncate" style={{ color: f.value ? "var(--text-primary)" : "var(--text-muted)" }}>{f.value ?? "\u2014"}</span>
+          {f.corrected && (
+            <span className="block text-[11px] leading-snug mt-0.5" style={{ color: "var(--accent-2)" }}>OCR read &ldquo;{String(f.corrected.original ?? "")}&rdquo; &middot; corrected by {f.corrected.by}</span>
+          )}
           {f.status === "review" && f.reasons.length > 0 && (
             <span className="block text-[11px] leading-snug mt-0.5" style={{ color: "var(--error-text)" }}>{f.reasons[0]}</span>
           )}
         </span>
-        <span>{badge && <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: badge.bg, color: badge.fg }}>{badge.text}</span>}</span>
+        <span className="flex items-center gap-1.5">
+          {f.corrected && f.status === "ok" ? (
+            <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: "var(--accent-soft-bg)", color: "var(--accent-2)" }}>corrected</span>
+          ) : (
+            badge && <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: badge.bg, color: badge.fg }}>{badge.text}</span>
+          )}
+          {editable && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setEditing({ target, values: { [target]: "" }, reason: "" }); }}
+              className="p-1 rounded hover:opacity-70"
+              aria-label={`Correct ${f.label}`}
+              title="Correct this value"
+            >
+              <Pencil className="h-3.5 w-3.5" style={{ color: "var(--text-muted)" }} />
+            </button>
+          )}
+        </span>
         <span>{f.source ? <ConfidenceBar confidence={f.source.confidence} threshold={threshold} /> : null}</span>
-      </button>
+      </div>
     );
   };
 
@@ -407,6 +529,21 @@ export default function ScanAnalysisPanel() {
 
                 {extraction && (
                   <>
+                    {/* Hand-off to the agent */}
+                    {onSendToAgent && (
+                      <div className="rounded-xl border px-5 py-3 flex flex-wrap items-center justify-between gap-3" style={cardStyle}>
+                        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                          {extraction.summary.needs_review > 0
+                            ? `${extraction.summary.needs_review} item(s) still need review. They are sent marked as unconfirmed; correct them first if you can.`
+                            : "All extracted values are confirmed or validated."}
+                          {(extraction.summary.corrected ?? 0) > 0 && ` ${extraction.summary.corrected} human correction(s) applied.`}
+                        </p>
+                        <button onClick={sendFindings} disabled={sending} className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg transition-opacity hover:opacity-90 disabled:opacity-50 shrink-0" style={{ background: "var(--accent)", color: "var(--accent-fg)" }}>
+                          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Send findings to agent
+                        </button>
+                      </div>
+                    )}
+
                     {/* Report fields */}
                     <div className="rounded-xl border px-5 pt-4 pb-2" style={cardStyle}>
                       <span className={cardTitle} style={{ color: "var(--text-secondary)" }}>REPORT FIELDS</span>
@@ -453,15 +590,37 @@ export default function ScanAnalysisPanel() {
                             <tbody>
                               {extraction.readings.map((r) => {
                                 const src = r.sources.current ?? r.sources.cml;
+                                const editingRow = editing?.target === `reading:${r.cml}`;
+                                const mark = (col: string) => (r.corrected?.[col] ? " *" : "");
+                                const note = Object.entries(r.corrected ?? {}).map(([col, c]) => `${col}: ${correctionNote(c)}`).join("\n");
+                                if (editingRow) {
+                                  return (
+                                    <tr key={r.cml}><td colSpan={7}>
+                                      {renderEditor(r.cml, [
+                                        { target: `reading:${r.cml}:location`, label: "location", current: r.location ?? "" },
+                                        ...READING_COLUMNS.map((col) => ({ target: `reading:${r.cml}:${col}`, label: col, current: r[col]?.toFixed(1) ?? "" })),
+                                      ])}
+                                    </td></tr>
+                                  );
+                                }
                                 return (
-                                  <tr key={r.cml} onClick={() => showSource(src)} className="border-t cursor-pointer hover:opacity-80" style={{ borderColor: "var(--border)" }} title={r.reasons.join("\n") || undefined}>
+                                  <tr key={r.cml} onClick={() => showSource(src)} className="border-t cursor-pointer hover:opacity-80" style={{ borderColor: "var(--border)" }} title={[note, r.reasons.join("\n")].filter(Boolean).join("\n") || undefined}>
                                     <td className="py-2 pr-3 font-mono font-semibold whitespace-nowrap text-[var(--text-primary)]">{r.cml}</td>
-                                    <td className="py-2 pr-3" style={{ color: "var(--text-secondary)" }}>{r.location ?? "\u2014"}</td>
-                                    <td className="py-2 pr-3 text-right font-mono" style={{ color: "var(--text-secondary)" }}>{r.nominal?.toFixed(1) ?? "\u2014"}</td>
-                                    <td className="py-2 pr-3 text-right font-mono" style={{ color: "var(--text-secondary)" }}>{r.previous?.toFixed(1) ?? "\u2014"}</td>
-                                    <td className="py-2 pr-3 text-right font-mono font-semibold" style={{ color: r.status === "review" ? "var(--error-text)" : "var(--text-primary)" }}>{r.current?.toFixed(1) ?? "\u2014"}</td>
+                                    <td className="py-2 pr-3" style={{ color: "var(--text-secondary)" }}>{r.location ?? "\u2014"}{mark("location")}</td>
+                                    <td className="py-2 pr-3 text-right font-mono" style={{ color: "var(--text-secondary)" }}>{r.nominal?.toFixed(1) ?? "\u2014"}{mark("nominal")}</td>
+                                    <td className="py-2 pr-3 text-right font-mono" style={{ color: "var(--text-secondary)" }}>{r.previous?.toFixed(1) ?? "\u2014"}{mark("previous")}</td>
+                                    <td className="py-2 pr-3 text-right font-mono font-semibold" style={{ color: r.status === "review" ? "var(--error-text)" : "var(--text-primary)" }}>{r.current?.toFixed(1) ?? "\u2014"}{mark("current")}</td>
                                     <td className="py-2 pr-3 text-right font-mono" style={{ color: "var(--text-secondary)" }}>{r.corrosion_rate != null ? r.corrosion_rate.toFixed(2) : "\u2014"}</td>
-                                    <td className="py-2">{r.status === "review" && <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: "var(--error-bg)", color: "var(--error-text)" }}>review</span>}</td>
+                                    <td className="py-2">
+                                      <span className="flex items-center gap-1.5">
+                                        {r.status === "review" && <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full whitespace-nowrap" style={{ background: "var(--error-bg)", color: "var(--error-text)" }}>review</span>}
+                                        {extraction.can_correct && (
+                                          <button type="button" onClick={(e) => { e.stopPropagation(); setEditing({ target: `reading:${r.cml}`, values: {}, reason: "" }); }} className="p-1 rounded hover:opacity-70" aria-label={`Correct ${r.cml}`} title="Correct readings">
+                                            <Pencil className="h-3.5 w-3.5" style={{ color: "var(--text-muted)" }} />
+                                          </button>
+                                        )}
+                                      </span>
+                                    </td>
                                   </tr>
                                 );
                               })}
